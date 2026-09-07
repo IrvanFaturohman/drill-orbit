@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1220">
+<title>Drill Orbit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+  <canvas id="game"></canvas>
+
+  <!-- ============ TOP HUD ============ -->
+  <div id="hud">
+    <div class="pill" id="coinPill">
+      <span class="coin"></span><span id="coinText">0</span>
+    </div>
+
+    <div id="bigStat">
+      <div id="statLabel">DISTANCE</div>
+      <div id="statValue">0<span class="unit">m</span></div>
+    </div>
+
+    <div class="pill" id="storagePill">
+      <span class="bag"></span><span id="storageText">0/5</span>
+    </div>
+  </div>
+
+  <div id="subStat" class="hidden"><span id="subLabel">BEST</span> <b id="subValue">0m</b></div>
+
+  <!-- live record countdown -->
+  <div id="chase" class="hidden"><span>BEST</span><b id="chaseVal">0m</b><i>→</i></div>
+
+  <!-- next meaningful destination -->
+  <div id="nextTarget" class="hidden">
+    <span>NEXT</span>
+    <b id="nextName">???</b>
+    <i id="nextDist">0m</i>
+  </div>
+
+  <!-- discovery strip: what is out there, and what is still unknown -->
+  <div id="strip" class="hidden"></div>
+
+  <!-- ============ HINTS ============ -->
+  <div id="tapHint" class="hint">TAP TO LAUNCH</div>
+
+  <!-- ============ UPGRADE BAR (layar utama) ============ -->
+  <div id="upgradeBar"></div>
+  <div id="steerHint" class="hint hidden">
+    <span class="sh-side">◀ HOLD LEFT</span><span class="sh-side">HOLD RIGHT ▶</span>
+  </div>
+
+  <!-- ============ RESULT + UPGRADES ============ -->
+  <div id="resultScreen" class="screen hidden">
+    <div class="sheet">
+      <div class="sheet-title" id="resultTitle">RUN COMPLETE</div>
+
+      <div class="stats">
+        <div class="stat" style="--d:0.05s"><span>DISTANCE</span><b id="rDist">0m</b></div>
+        <div class="stat" style="--d:0.13s"><span>DEPTH</span><b id="rDepth">0m</b></div>
+        <div class="stat" style="--d:0.21s"><span>MINERALS</span><b id="rMin">0</b></div>
+      </div>
+
+      <div class="earned" style="--d:0.30s">
+        <span>EARNED</span>
+        <b id="rCoins">+0 COINS</b>
+        <i id="rBreak">minerals 0 &nbsp;+&nbsp; distance 0</i>
+      </div>
+
+      <div class="haul" id="rHaul"></div>
+
+      <button id="adBtn" class="ad-btn">
+        <span class="ad-play">▶</span>
+        <span class="ad-copy">
+          <b>WATCH AD</b>
+          <i>double your coins</i>
+        </span>
+        <span class="ad-mult">×2</span>
+      </button>
+
+      <button id="launchAgain" class="big-btn">COLLECT</button>
+    </div>
+  </div>
+
+  <!-- ============ AD PLACEHOLDER ============ -->
+  <div id="adOverlay" class="hidden">
+    <div class="ad-box">
+      <div class="ad-badge">AD PLACEHOLDER</div>
+      <div class="ad-sim">
+        <div class="ad-bars"><i></i><i></i><i></i></div>
+        <div class="ad-simtxt">rewarded video</div>
+      </div>
+      <div class="ad-count" id="adCount">3</div>
+      <div class="ad-note">no real ad network — prototype only</div>
+    </div>
+  </div>
+
+  <!-- ============ DEBUG ============ -->
+  <button id="dbgToggle" title="debug">⚙</button>
+  <div id="debug" class="hidden">
+    <div class="dbg-row"><label>Coins</label><input id="dCoins" type="number" min="0" step="50"></div>
+    <div class="dbg-row"><label>Power Lv</label><input id="dPower" type="number" min="1" max="60"></div>
+    <div class="dbg-row"><label>Bounce Lv</label><input id="dBounce" type="number" min="1" max="60"></div>
+    <div class="dbg-row"><label>Drill Lv</label><input id="dDrill" type="number" min="1" max="60"></div>
+    <div class="dbg-row"><label>Storage Lv</label><input id="dStorage" type="number" min="1" max="60"></div>
+    <div class="dbg-row"><label>Best (m)</label><input id="dBest" type="number" min="0" step="10"></div>
+    <div class="dbg-btns">
+      <button id="dAddCoins">+1000 Coins</button>
+      <button id="dMaxPower">Max Power</button>
+      <button id="dPerfect" class="toggle">Auto&nbsp;Perfect: OFF</button>
+      <button id="dMute" class="toggle">Sound: ON</button>
+      <button id="dZones" class="toggle">Zones: OFF</button>
+      <button id="dRestart">Restart Run</button>
+      <button id="dFound">Reveal All</button>
+      <button id="dReset" class="danger">Reset Progress</button>
+    </div>
+    <div class="dbg-note" id="dbgNote">v-lv changes apply on next launch</div>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/world.js"></script>
+<script src="js/player.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
