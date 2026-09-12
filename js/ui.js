@@ -5,7 +5,16 @@ const KEY = 'drillorbit.save.v1';
 
 const Save = {
   data: null,
-  DEF: { coins: 0, power: 1, bounce: 1, drill: 1, storage: 1, best: 0, deepest: 0, runs: 0, muted: false, found: [] },
+  /* `bounce` is the IMPACT upgrade level; `storage` is a dead field kept so old saves
+     merge cleanly. Keys written by versions that had surface modes (surfaceMode, impactV2,
+     tutDive, tutBoost) are NOT listed here and are never read again — note that the merge
+     below keeps unknown keys, so they stay in the stored blob rather than being cleaned
+     out. Harmless, and cheaper than a migration that can only ever delete dead bytes. */
+  DEF: {
+    coins: 0, power: 1, bounce: 1, drill: 1, storage: 1,
+    best: 0, deepest: 0, runs: 0, muted: false, found: [],
+    shake: 1, haptics: true,
+  },
 
   load() {
     let d = null;
@@ -32,9 +41,17 @@ function upgradeCost(level) {
 
 const UPGRADES = [
   { key: 'power',   name: 'POWER',   c1: '#ff9f45', c2: '#ff5f6d', desc: () => 'Launch Power +10%' },
-  { key: 'bounce',  name: 'BOUNCE',  c1: '#7ee8fa', c2: '#3a7bd5', desc: () => 'Bounce +8%' },
+  /* SAVE COMPATIBILITY: the key stays `bounce` while the label reads IMPACT.
+     The stat was BOUNCE when terrain bouncing was the core loop; in IMPACT mode the same
+     level now drives how much arriving kinetic energy becomes penetration budget
+     (Game.impactEfficiency). Renaming the save key would strand every existing player's
+     upgrade level for a prototype rename, so the key is left alone on purpose. */
+  { key: 'bounce',  name: 'IMPACT',  c1: '#7ee8fa', c2: '#3a7bd5',
+    desc: () => 'Penetration +' + Math.round(CFG.IMPACT_EFF_PER * 100) + '%' },
   { key: 'drill',   name: 'DRILL',   c1: '#ffe259', c2: '#ffa751', desc: () => 'Max Depth +' + CFG.DEPTH_PER + 'm' },
-  { key: 'storage', name: 'STORAGE', c1: '#a8ff78', c2: '#3ec46d', desc: () => 'Carry +1 Mineral' },
+  /* STORAGE removed. The carry cap ended most runs before MAX DEPTH, which is precisely
+     what made the DRILL upgrade feel like it did nothing. `Save.data.storage` is left in
+     the save untouched so nobody's file breaks, it just no longer does anything. */
 ];
 
 /* ============ DOM ============ */
@@ -48,12 +65,13 @@ const UI = {
     const id = (s) => document.getElementById(s);
     this.el = {
       coinText: id('coinText'), statLabel: id('statLabel'), statValue: id('statValue'),
-      storagePill: id('storagePill'), storageText: id('storageText'), coinPill: id('coinPill'),
+      storagePill: id('haulPill'), storageText: id('haulText'), coinPill: id('coinPill'),
       subStat: id('subStat'), subLabel: id('subLabel'), subValue: id('subValue'),
       chase: id('chase'), chaseVal: id('chaseVal'),
       nextTarget: id('nextTarget'), nextName: id('nextName'), nextDist: id('nextDist'),
       strip: id('strip'),
       tapHint: id('tapHint'), steerHint: id('steerHint'),
+      energy: id('energyBar'), energyFill: id('energyFill'),
       screen: id('resultScreen'), title: id('resultTitle'),
       rDist: id('rDist'), rDepth: id('rDepth'), rMin: id('rMin'),
       rCoins: id('rCoins'), rBreak: id('rBreak'), rHaul: id('rHaul'),
@@ -62,7 +80,9 @@ const UI = {
       debug: id('debug'), dbgToggle: id('dbgToggle'),
     };
 
-    /* upgrade buttons */
+    /* upgrade buttons. The column count follows UPGRADES so dropping one (STORAGE) does
+       not leave a hole in the bar. */
+    this.el.upgrades.style.gridTemplateColumns = `repeat(${UPGRADES.length}, 1fr)`;
     for (const u of UPGRADES) {
       const b = document.createElement('button');
       b.className = 'up-btn';
@@ -85,9 +105,20 @@ const UI = {
   },
 
   setPhase(phase) {
-    const drilling = phase === 'drill';
+    const drilling = phase === 'drill' || phase === 'impact';
     this.el.storagePill.classList.toggle('hidden', !drilling);
-    this.el.statLabel.textContent = drilling ? 'DEPTH' : 'DISTANCE';
+    this.el.statLabel.textContent = phase === 'impact' ? 'IMPACT DEPTH' : drilling ? 'DEPTH' : 'DISTANCE';
+  },
+
+  /* Flight energy bar. `k` is 0..1 of the launch's own mechanical energy, so a clean arc
+     holds near full and the bar reads as "this is the hit I bought", not as a fuel gauge
+     draining. Null hides it. No numbers and no equations — those live in debug only. */
+  setEnergy(k) {
+    const e = this.el.energy;
+    if (!e) return;
+    if (k == null) { e.classList.add('hidden'); return; }
+    e.classList.remove('hidden');
+    this.el.energyFill.style.width = (U.clamp(k, 0, 1) * 100).toFixed(1) + '%';
   },
 
   /* the bar owns the bottom of the screen, so the canvas meter has to sit above it */
@@ -118,9 +149,9 @@ const UI = {
     setTimeout(() => this.el.statValue.classList.remove('punch'), 110);
   },
 
-  setStorage(n, max) {
-    this.el.storageText.textContent = n + '/' + max;
-    this.el.storagePill.classList.toggle('full', n >= max);
+  /* how many minerals this run has picked up. No cap any more, so no "/max". */
+  setHaul(n) {
+    this.el.storageText.textContent = '×' + n;
   },
 
   setSub(label, value) {
@@ -318,14 +349,20 @@ const UI = {
       power: bind('dPower', 'power'),
       bounce: bind('dBounce', 'bounce'),
       drill: bind('dDrill', 'drill'),
-      storage: bind('dStorage', 'storage'),
+    };
+
+    /* live tuning of the two surface-flight levers; CFG only, nothing is saved */
+    const bindCfg = (elId, key) => {
+      const el = id(elId);
+      el.value = CFG[key];
+      el.addEventListener('change', () => { const v = +el.value; if (v > 0) CFG[key] = v; el.value = CFG[key]; });
     };
 
     id('dAddCoins').addEventListener('click', () => {
       Save.data.coins += 1000; Save.save(); this.refreshUpgrades(); Game.syncFromSave();
     });
     id('dMaxPower').addEventListener('click', () => {
-      Save.data.power = 20; Save.data.bounce = 12; Save.data.drill = 14; Save.data.storage = 12;
+      Save.data.power = 20; Save.data.bounce = 12; Save.data.drill = 14;
       Save.save(); this.refreshUpgrades(); Game.syncFromSave();
     });
     const perfectBtn = id('dPerfect');
@@ -349,6 +386,34 @@ const UI = {
       zonesBtn.classList.toggle('on', Game.showZones);
       zonesBtn.textContent = 'Zones: ' + (Game.showZones ? 'ON' : 'OFF');
     });
+
+    /* Screen shake strength. A cycler rather than a number box because judging shake is
+       a feel question and the only way to answer it is to run the same launch at a few
+       settings. Applies immediately; no restart needed. */
+    const shakeBtn = id('dShake');
+    this._shakeBtn = shakeBtn;
+    const SHAKES = [1, 0.65, 0.35, 0];
+    shakeBtn.addEventListener('click', () => {
+      const cur = Save.data.shake === undefined ? 1 : Save.data.shake;
+      let i = SHAKES.indexOf(cur);
+      if (i < 0) i = 0;
+      Save.data.shake = SHAKES[(i + 1) % SHAKES.length];
+      Save.save();
+      this.syncFeel();
+      Game.shake(14, 0.3, 0, 1);            // preview the new setting
+    });
+
+    /* Haptics. Silently unavailable on iOS Safari, which does not implement the
+       Vibration API at all — the button says so rather than pretending it worked. */
+    const hapBtn = id('dHaptics');
+    this._hapBtn = hapBtn;
+    hapBtn.addEventListener('click', () => {
+      if (!(typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function')) return;
+      Haptics.setEnabled(Save.data.haptics === false);
+      this.syncFeel();
+      if (Save.data.haptics) Haptics.impact(1);
+    });
+
     id('dRestart').addEventListener('click', () => { this.hideResult(); Game.resetToPad(); });
     id('dFound').addEventListener('click', () => {
       Save.data.found = SITES.filter((s) => s.kind === 'mystery').map((s) => s.id);
@@ -357,11 +422,37 @@ const UI = {
     });
 
     id('dReset').addEventListener('click', () => {
-      Save.reset(); this.refreshUpgrades(); Game.syncFromSave(); Game.resetToPad();
+      Save.reset();
+      World.clearCraters();               // terrain damage is progress too
+      this.refreshUpgrades(); Game.syncFromSave(); Game.resetToPad();
     });
   },
 
+  syncFeel() {
+    if (this._shakeBtn) {
+      const v = Save.data.shake === undefined ? 1 : Save.data.shake;
+      this._shakeBtn.textContent = 'Shake: ' + (v === 0 ? 'OFF' : Math.round(v * 100) + '%');
+      this._shakeBtn.classList.toggle('on', v > 0);
+    }
+    if (this._hapBtn) {
+      const supported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+      const on = supported && Save.data.haptics !== false;
+      this._hapBtn.textContent = supported ? 'Haptics: ' + (on ? 'ON' : 'OFF') : 'Haptics: n/a';
+      this._hapBtn.classList.toggle('on', on);
+      this._hapBtn.disabled = !supported;
+      this._hapBtn.title = supported ? 'Vibration on impact, strata and rare finds'
+        : 'iOS Safari does not implement the Vibration API';
+    }
+  },
+
   syncDebug() {
+    /* typeof-guarded on purpose: a half-stale browser cache (new ui.js, old utils.js)
+       would otherwise throw ReferenceError here, and because syncDebug runs during init
+       that took the whole game down to a blank screen. A debug label must never be able
+       to do that. */
+    const note = document.getElementById('dbgNote');
+    if (note) note.textContent = 'build: ' + (typeof BUILD === 'undefined' ? '?' : BUILD);
+    this.syncFeel();
     if (!this.dbgInputs) return;
     for (const k in this.dbgInputs) this.dbgInputs[k].value = Save.data[k];
     if (this._syncMute) this._syncMute();

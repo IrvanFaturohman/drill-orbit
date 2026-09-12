@@ -1,6 +1,48 @@
 'use strict';
 /* ============ particles, shockwave rings, floating text ============ */
 
+/* ============ particle silhouettes ============
+   Debris used to be literal rotating squares and hard-edged circles, which is what made it
+   read as "shapes" rather than as dirt and rock.
+
+   Generated in code rather than authored as sprites, for two reasons. Particles are tinted
+   per biome at runtime (grassland soil, desert sandstone, volcanic basalt, embers), so an
+   image would need one copy per colour; and pre-rendered sprites measured 3.4x SLOWER than
+   filled paths here, because scaling a 40px cell down to a 6px chunk has to filter, several
+   hundred times a frame. See the note in drawP for the numbers.                           */
+/* Unit silhouettes, built once and shared by every particle — nothing is allocated per
+   particle, which only stores which variant it picked. */
+const POLY_VARIANTS = 8;
+function buildPolys(kind) {
+  const rnd = U.mulberry32(kind === 'rock' ? 7717 : kind === 'clod' ? 3331 : 911);
+  const out = [];
+  for (let v = 0; v < POLY_VARIANTS; v++) {
+    const pts = [];
+    if (kind === 'shard') {
+      /* a splinter: long, thin, lopsided */
+      const w = 0.22 + rnd() * 0.22;
+      pts.push(0, -1, w, -0.1, w * 0.5, 1, -w * 0.85, 0.3);
+    } else {
+      const n = kind === 'rock' ? 5 + ((rnd() * 3) | 0)
+              : kind === 'puff' ? 9 + ((rnd() * 4) | 0)
+              : 7 + ((rnd() * 3) | 0);
+      /* stone is angular, soil is lumpy, a dust puff is billowy */
+      const wob = kind === 'rock' ? 0.42 : kind === 'puff' ? 0.34 : 0.24;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * U.TAU + (rnd() - 0.5) * 0.5;
+        const rr = 1 - wob * rnd();
+        pts.push(Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+    }
+    out.push(Float32Array.from(pts));
+  }
+  return out;
+}
+const POLY = { rock: buildPolys('rock'), clod: buildPolys('clod'), shard: buildPolys('shard') };
+const PUFF = buildPolys('puff');
+/* the shaded face on the lower-right of a chunk, in the same unit space */
+const FACET = Float32Array.from([1, 1, 1, -0.25, -0.15, 0.6, -0.5, 1]);
+
 const FX = {
   ps: [],
   rings: [],
@@ -17,8 +59,29 @@ const FX = {
     p.g = p.g === undefined ? 900 : p.g;
     p.drag = p.drag === undefined ? 0.6 : p.drag;
     p.shape = p.shape || 'circle';
+    /* `square` was the old name for debris; it now means a real rock chunk */
+    if (p.shape === 'square') p.shape = 'rock';
+    /* pick this chunk's silhouette once, so it does not flicker between frames */
+    p.v = (Math.random() * POLY_VARIANTS) | 0;
     this.ps.push(p);
     return p;
+  },
+
+  /* Where a burst's particles START. Two options, both there for the same reason: an
+     impact freezes the frame for ~100ms right after spawning a few hundred particles, and
+     particles that all begin life at one point read as a single opaque blob for the whole
+     freeze — the explosion only becomes an explosion once it has been allowed to move.
+       spanX   spawns them along a width (the crater mouth) instead of a point.
+       groundY places each one on the ground it is thrown from, so debris leaves the
+               surface rather than erupting out of mid-air above a hole.
+       lead    pre-advances each particle along its own velocity by up to this many
+               seconds, so frame zero already looks like a spray. Invisible in motion. */
+  spawnAt(x, y, opt, vx, vy) {
+    const spanX = opt.spanX || 0;
+    const ox = x + (spanX ? U.rand(-spanX, spanX) : 0) + U.rand(-4, 4);
+    const oy = opt.groundY ? opt.groundY(ox) + U.rand(-4, 2) : y + U.rand(-4, 4);
+    const l = opt.lead ? Math.random() * opt.lead : 0;
+    return { x: ox + vx * l, y: oy + vy * l };
   },
 
   /* generic radial burst */
@@ -29,9 +92,11 @@ const FX = {
     for (let i = 0; i < n; i++) {
       const a = dir + (Math.random() - 0.5) * spread;
       const s = U.rand(opt.spd0 || 60, opt.spd1 || 260);
+      const vx = Math.cos(a) * s, vy = Math.sin(a) * s;
+      const o = this.spawnAt(x, y, opt, vx, vy);
       this.add({
-        x: x + U.rand(-4, 4), y: y + U.rand(-4, 4),
-        vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        x: o.x, y: o.y,
+        vx, vy,
         r: U.rand(opt.r0 || 2, opt.r1 || 6),
         life: U.rand(opt.life0 || 0.3, opt.life1 || 0.75),
         color: Array.isArray(opt.color) ? U.pick(opt.color) : opt.color || '#fff',
@@ -41,16 +106,20 @@ const FX = {
     }
   },
 
-  /* soft ground dust puff */
-  dust(x, y, n, color, power) {
+  /* soft ground dust puff. `opt` takes the same spanX/groundY/lead as burst(). */
+  dust(x, y, n, color, power, opt) {
+    const o = opt || {};
     for (let i = 0; i < n; i++) {
       const a = -Math.PI / 2 + U.rand(-1.35, 1.35);
       const s = U.rand(30, 180) * (power || 1);
+      const vx = Math.cos(a) * s, vy = Math.sin(a) * s * 0.55;
+      const at = this.spawnAt(x, y, o, vx, vy);
       this.add({
-        x: x + U.rand(-10, 10), y: y + U.rand(-3, 5),
-        vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.55,
+        x: at.x + U.rand(-6, 6), y: at.y + U.rand(-3, 5),
+        vx, vy,
         r: U.rand(5, 14) * (0.7 + (power || 1) * 0.4),
         life: U.rand(0.45, 1.0), color, g: -25, drag: 1.7, grow: U.rand(8, 26),
+        shape: 'dust', vr: U.rand(-1.2, 1.2),
       });
     }
   },
@@ -65,6 +134,7 @@ const FX = {
         r: U.rand(4, 11), life: U.rand(0.14, 0.3),
         color: U.pick(['#fff3b0', '#ffb03a', '#ff6a2a', '#ff3d2e']),
         g: 0, drag: 3.5, glow: true, shrink: true,
+        shape: 'shard', rot: a + Math.PI / 2, vr: U.rand(-4, 4),
       });
     }
   },
@@ -169,29 +239,87 @@ function drawP(ctx, p) {
   let a = 1 - k * k;
   if (p.fadeIn && k < 0.15) a *= k / 0.15;
   ctx.globalAlpha = U.clamp(a, 0, 1);
-  ctx.fillStyle = p.color;
   const r = p.shrink ? p.r * (1 - k) : p.r;
   if (r <= 0.1) return;
-  if (p.shape === 'square') {
-    ctx.save();
-    ctx.translate(p.x, p.y); ctx.rotate(p.rot);
-    ctx.fillRect(-r, -r, r * 2, r * 2);
-    ctx.restore();
-  } else if (p.shape === 'streak') {
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth = r;
-    ctx.lineCap = 'round';
+
+  /* Chunks: an irregular filled polygon, transformed BY HAND.
+     Measured per 200 particles, over a 0.71 ms empty-scene baseline:
+       plain circle 0.26 · shard 0.57 · sprite 0.93 · polygon-with-save/restore 1.25
+     The cost was never the shape — it was five canvas state calls per particle
+     (save, translate, rotate, scale, restore). Rotating eight vertices in JS is free by
+     comparison, so the transform happens here and the context is left alone. */
+  const poly = POLY[p.shape];
+  if (poly) {
+    const pts = poly[p.v % POLY_VARIANTS];
+    const cs = p.rot ? Math.cos(p.rot) : 1;
+    const sn = p.rot ? Math.sin(p.rot) : 0;
+    ctx.fillStyle = p.color;
     ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.lineTo(p.x - p.vx * 0.035, p.y - p.vy * 0.035);
-    ctx.stroke();
-  } else if (p.shape === 'shard') {
-    ctx.save();
-    ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    for (let i = 0; i < pts.length; i += 2) {
+      const px = pts[i] * r, py = pts[i + 1] * r;
+      const X = p.x + px * cs - py * sn;
+      const Y = p.y + px * sn + py * cs;
+      i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    /* one shadow triangle gives the chunk volume, on any tint, without a second colour.
+       Only worth a second path once the chunk is big enough to read one. */
+    if (r > 6) {
+      const f = FACET;
+      ctx.fillStyle = 'rgba(0,0,0,.3)';
+      ctx.beginPath();
+      for (let i = 0; i < f.length; i += 2) {
+        const px = f[i] * r, py = f[i + 1] * r;
+        const X = p.x + px * cs - py * sn;
+        const Y = p.y + px * sn + py * cs;
+        i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    return;
+  }
+
+  ctx.fillStyle = p.color;
+  /* dust: two flat discs instead of a gradient. A soft rim for one extra arc, where a
+     per-particle radial gradient or a scaled sprite cost three times as much. */
+  /* Dust: two nested BILLOWY silhouettes at low alpha, hand-transformed like a chunk.
+     Perfect circles at 0.5/0.85 alpha made every puff read as a separate hard-edged
+     bubble, and forty of them at an impact looked like soap rather than a dust cloud.
+     Lumpy outlines that are individually faint accumulate into one mass instead. */
+  if (p.shape === 'dust') {
+    const pts = PUFF[p.v % POLY_VARIANTS];
+    const cs = p.rot ? Math.cos(p.rot) : 1;
+    const sn = p.rot ? Math.sin(p.rot) : 0;
+    const base = ctx.globalAlpha * (0.82 + (p.v % 4) * 0.08);
+    const ring = (rad, alpha) => {
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i += 2) {
+        const px = pts[i] * rad, py = pts[i + 1] * rad;
+        const X = p.x + px * cs - py * sn;
+        const Y = p.y + px * sn + py * cs;
+        i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    };
+    ring(r, base * 0.30);
+    ring(r * 0.62, base * 0.34);
+    return;
+  }
+  if (p.shape === 'streak') {
+    /* tapered, not a constant-width line: wide at the head, nothing at the tail */
+    const tx = p.x - p.vx * 0.035, ty = p.y - p.vy * 0.035;
+    const nx = -(ty - p.y), ny = tx - p.x;
+    const len = Math.hypot(nx, ny) || 1;
     ctx.beginPath();
-    ctx.moveTo(0, -r); ctx.lineTo(r * 0.8, 0); ctx.lineTo(0, r); ctx.lineTo(-r * 0.8, 0);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
+    ctx.moveTo(p.x + (nx / len) * r * 0.5, p.y + (ny / len) * r * 0.5);
+    ctx.lineTo(p.x - (nx / len) * r * 0.5, p.y - (ny / len) * r * 0.5);
+    ctx.lineTo(tx, ty);
+    ctx.closePath();
+    ctx.fill();
   } else {
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, U.TAU);

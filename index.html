@@ -26,8 +26,9 @@
       <div id="statValue">0<span class="unit">m</span></div>
     </div>
 
-    <div class="pill" id="storagePill">
-      <span class="bag"></span><span id="storageText">0/5</span>
+    <!-- this run's haul. No carry cap, so no denominator. -->
+    <div class="pill" id="haulPill">
+      <span class="bag"></span><span id="haulText">×0</span>
     </div>
   </div>
 
@@ -46,13 +47,16 @@
   <!-- discovery strip: what is out there, and what is still unknown -->
   <div id="strip" class="hidden"></div>
 
+  <!-- flight energy: how big the hit is going to be. No numbers, on purpose. -->
+  <div id="energyBar" class="hidden"><span>IMPACT</span><div class="track"><i id="energyFill"></i></div></div>
+
   <!-- ============ HINTS ============ -->
   <div id="tapHint" class="hint">TAP TO LAUNCH</div>
 
   <!-- ============ UPGRADE BAR (layar utama) ============ -->
   <div id="upgradeBar"></div>
   <div id="steerHint" class="hint hidden">
-    <span class="sh-side">◀ HOLD LEFT</span><span class="sh-side">HOLD RIGHT ▶</span>
+    <span class="sh-side">◀ DRAG TO STEER ▶</span>
   </div>
 
   <!-- ============ RESULT + UPGRADES ============ -->
@@ -105,15 +109,17 @@
   <div id="debug" class="hidden">
     <div class="dbg-row"><label>Coins</label><input id="dCoins" type="number" min="0" step="50"></div>
     <div class="dbg-row"><label>Power Lv</label><input id="dPower" type="number" min="1" max="60"></div>
-    <div class="dbg-row"><label>Bounce Lv</label><input id="dBounce" type="number" min="1" max="60"></div>
+    <!-- save key is still `bounce`; the stat is IMPACT now (see UPGRADES in js/ui.js) -->
+    <div class="dbg-row"><label>Impact Lv</label><input id="dBounce" type="number" min="1" max="60"></div>
     <div class="dbg-row"><label>Drill Lv</label><input id="dDrill" type="number" min="1" max="60"></div>
-    <div class="dbg-row"><label>Storage Lv</label><input id="dStorage" type="number" min="1" max="60"></div>
     <div class="dbg-row"><label>Best (m)</label><input id="dBest" type="number" min="0" step="10"></div>
     <div class="dbg-btns">
       <button id="dAddCoins">+1000 Coins</button>
       <button id="dMaxPower">Max Power</button>
       <button id="dPerfect" class="toggle">Auto&nbsp;Perfect: OFF</button>
       <button id="dMute" class="toggle">Sound: ON</button>
+      <button id="dShake" class="toggle">Shake: 100%</button>
+      <button id="dHaptics" class="toggle">Haptics: ON</button>
       <button id="dZones" class="toggle">Zones: OFF</button>
       <button id="dRestart">Restart Run</button>
       <button id="dFound">Reveal All</button>
@@ -126,6 +132,7 @@
 <script src="js/utils.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/particles.js"></script>
+<script src="js/vectors.js"></script>
 <script src="js/world.js"></script>
 <script src="js/player.js"></script>
 <script src="js/ui.js"></script>

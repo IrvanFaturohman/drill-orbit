@@ -18,16 +18,16 @@ class Pod {
     this.sx = 1; this.sy = 1;          // squash / stretch
     this.squash = 0;                    // impact impulse
     this.charge = 0;                    // pre-launch compression
-    this.boost = 0;                     // booster flame timer
     this.trail = [];
     this.grounded = false;
-    this.rolling = false;
-    this.restT = 0;
-    this.bounces = 0;
     this.drilling = false;
     this.overdrive = false;
     this.steer = 0;
     this.slowT = 0;                     // hit-a-rock slowdown
+    this.impactE = 0;                   // penetration energy budget left
+    this.impactE0 = 0;                  // ...and what it started at, for the bore taper
+    this.penAngle = Math.PI / 2;        // direction the impact is carrying the drill
+    this.soilResist = 1;                // biome resistance multiplier at the crash site
   }
 
   get speed() { return Math.hypot(this.vx, this.vy); }
@@ -36,81 +36,39 @@ class Pod {
     this.vx = Math.cos(-angle) * v;
     this.vy = Math.sin(-angle) * v;
     this.grounded = false;
-    this.rolling = false;
-    this.boost = 0.5;
     this.squash = -0.55;                // stretch
-    this.bounces = 0;
   }
 
-  /* ---------- flight ---------- */
-  updateFlight(dt, onBounce) {
+  /* ---------- flight: a ballistic arc, then one contact ----------
+     The pod is a thrown mass. Nothing acts on it but gravity, so mechanical energy is
+     conserved and the apex is only a visual promise of the speed coming back. There is
+     no air control and no terrain bouncing: the first serious ground contact ends the
+     arc and hands the run to onImpact(x, y, speed, angle). */
+  updateFlight(dt, onImpact) {
     const sub = U.clamp(Math.ceil((this.speed * dt) / 6), 1, 24);
     const h = dt / sub;
-
     for (let i = 0; i < sub; i++) {
       this.vy += CFG.GRAV * h;
       this.x += this.vx * h;
       this.y += this.vy * h;
-
-      const gy = World.yAt(this.x);
-      const contact = gy - this.r;
-
+      const contact = World.yAt(this.x) - this.r;
       if (this.y >= contact) {
-        const sl = World.slopeAt(this.x);
-        const len = Math.hypot(sl, 1);
-        const nx = sl / len, ny = -1 / len;              // up-normal
-        const vn = this.vx * nx + this.vy * ny;
         this.y = contact;
         this.grounded = true;
-
-        if (vn < 0) {
-          const impact = -vn;
-          if (impact > 62 && !this.rolling) {
-            const e = Game.restitution();
-            this.vx -= (1 + e) * vn * nx;
-            this.vy -= (1 + e) * vn * ny;
-            // tangential scrub
-            const tx = 1 / len, ty = sl / len;
-            const vt = this.vx * tx + this.vy * ty;
-            const keep = 0.965;
-            this.vx += (vt * keep - vt) * tx;
-            this.vy += (vt * keep - vt) * ty;
-            this.bounces++;
-            this.squash = 0.75;
-            if (onBounce) onBounce(this.x, this.y + this.r, impact);
-          } else {
-            // settle into a roll along the slope
-            this.vx -= vn * nx;
-            this.vy -= vn * ny;
-            this.rolling = true;
-          }
-        }
-        if (this.rolling) {
-          // gravity along the tangent + rolling friction
-          const tx = 1 / len, ty = sl / len;
-          const gt = CFG.GRAV * ty;
-          this.vx += gt * tx * h;
-          this.vy += gt * ty * h;
-          /* landing zones grip a pod that is already rolling, without stealing energy
-             from one that is still bouncing through at speed */
-          const inZone = World.siteAt(World.mOf(this.x)) !== null;
-          const fr = Math.exp(-(inZone ? 5.2 : 2.7) * h);
-          this.vx *= fr; this.vy *= fr;
-        }
-      } else {
-        this.grounded = false;
-        if (this.vy > 40) this.rolling = false;
+        /* A crawling contact is a landing, not an impact: without this a pod that runs
+           out of arc on an upslope would trigger the whole meteor sequence at 40px/s. */
+        const spd = this.speed;
+        const ang = Math.atan2(this.vy, this.vx);
+        this.vx = 0; this.vy = 0;
+        onImpact(this.x, this.y + this.r, spd, ang);
+        return;
       }
+      this.grounded = false;
     }
+    /* nose tracks the path exactly — a falling meteor has no reason to flare */
+    if (this.speed > 30) this.angle = angleDamp(this.angle, Math.atan2(this.vy, this.vx), 11, dt);
+    this.spin += dt * 2.5;
 
-    /* orientation follows the velocity vector */
-    if (!this.rolling && this.speed > 30) {
-      const target = Math.atan2(this.vy, this.vx);
-      this.angle = angleDamp(this.angle, target, 9, dt);
-    }
-    this.spin += dt * U.clamp(this.speed / 90, 4, 26);
-
-    /* trail */
     if (this.speed > 170) {
       this.trail.push({ x: this.x, y: this.y, a: 1 });
       if (this.trail.length > (this.overdrive ? 40 : 26)) this.trail.shift();
@@ -119,13 +77,70 @@ class Pod {
       this.trail[i].a -= dt * 2.1;
       if (this.trail[i].a <= 0) this.trail.splice(i, 1);
     }
-
-    this.boost = Math.max(0, this.boost - dt);
     this.tickSquash(dt);
+  }
 
-    /* rest detection */
-    if (this.grounded && this.speed < 52) this.restT += dt;
-    else this.restT = 0;
+  /* ---------- IMPACT mode: automatic penetration ----------
+     Carried by leftover impact energy. Speed comes from the energy still in the budget
+     (v = scale * sqrt(E), the same shape as E = 1/2 m v2), and each metre of soil takes
+     a bite out of it, so the drill slows the way something ploughing through earth does
+     rather than on a timer. Returns metres travelled this frame. */
+  updatePenetrate(dt, ug, cb) {
+    const startY = this.y;
+    /* soil gets harder with depth, which guarantees the budget always runs out */
+    const depthM = (this.y - ug.surfaceY) / CFG.M;
+    const resist = CFG.SOIL_RESISTANCE * this.soilResist * (1 + depthM * CFG.SOIL_HARDEN_PER_M);
+
+    const v = U.clamp(CFG.PEN_SPEED_SCALE * Math.sqrt(Math.max(0, this.impactE)),
+                      0, CFG.PEN_MAX_SPEED);
+    /* the path bends from the impact angle toward straight down: soil resists sideways
+       travel far more than downward, and it leaves the pod pointing down for drilling */
+    this.penAngle = angleDamp(this.penAngle, Math.PI / 2, CFG.PEN_TURN, dt);
+    const step = v * dt;
+    this.x += Math.cos(this.penAngle) * step;
+    this.y += Math.sin(this.penAngle) * step;
+
+    /* walls */
+    const lo = ug.centerX - ug.halfW + this.r;
+    const hi = ug.centerX + ug.halfW - this.r;
+    this.x = U.clamp(this.x, lo, hi);
+
+    const metres = Math.abs(this.y - startY) / CFG.M;
+    this.impactE = Math.max(0, this.impactE - resist * metres);
+
+    this.angle = angleDamp(this.angle, this.penAngle, 12, dt);
+    this.spin += dt * 40;
+    this.vx = Math.cos(this.penAngle) * v;     // kept live for FX and the debug readout
+    this.vy = Math.sin(this.penAngle) * v;
+
+    /* the drill eats whatever it passes through — no steering required, by design */
+    /* Stamp the tunnel with a radius that follows the remaining energy. A violent entry
+       tears a wide hole; as the budget drains the bore narrows, so the player can SEE the
+       momentum running out before the drill stops — the transition to manual drilling
+       reads without any UI saying so.
+       Taper against THIS run's own budget, not an absolute constant. Keyed to a fixed 1.0
+       the clamp pinned the bore at maximum for the first third of every penetration (and
+       for almost all of a high-level one), so the hole read as a uniform smear that
+       suddenly stopped. Normalised, the narrowing spans the whole dig at every level. */
+    const t = this.impactE0 > 0 ? U.clamp(this.impactE / this.impactE0, 0, 1) : 0;
+    const bore = U.lerp(CFG.TUNNEL_R_MIN, CFG.TUNNEL_R_MAX, Math.sqrt(t));
+    /* ragged scales with what is left: the entry chews the wall, the tail is nearly clean */
+    World.stampTunnel(ug, this.x, this.y, bore, t);
+    for (const m of ug.minerals) {
+      if (m.got) continue;
+      if (Math.hypot(m.x - this.x, m.y - this.y) < this.r + m.r + 6) { m.got = true; cb.mineral(m); }
+    }
+    for (const r of ug.rocks) {
+      if (r.dead) continue;
+      if (Math.hypot(r.x - this.x, r.y - this.y) < this.r + r.r) {
+        r.dead = true;
+        /* rock costs energy: a boulder is what makes one impact stop short of another */
+        this.impactE = Math.max(0, this.impactE - CFG.SOIL_RESISTANCE * 1.6);
+        cb.rock(r);
+      }
+    }
+    this.tickSquash(dt);
+    return { metres, v };
   }
 
   /* ---------- drilling ---------- */
@@ -134,9 +149,14 @@ class Pod {
     const t = U.clamp(depthPx / Math.max(80, ug.botY - ug.surfaceY), 0, 1);
     let targetVy = U.lerp(CFG.DRILL_VY, CFG.DRILL_VY_DEEP, t);
     if (this.slowT > 0) { targetVy *= 0.32; this.slowT -= dt; }
+    /* A hard turn costs a little descent. Steering was previously free, which made the
+       straight line and the weaving line identical in every way except what they picked
+       up — so there was no line to choose. It is deliberately small: a cost you can feel
+       in the drill's weight, never one that punishes going after a mineral. */
+    targetVy *= 1 - CFG.DRILL_TURN_COST * Math.abs(this.steer);
 
     this.vy = U.damp(this.vy, targetVy, 6, dt);
-    const want = this.steer * CFG.DRILL_VX_MAX;
+    const want = this.steer * targetVy * CFG.DRILL_STEER_RATIO;
     const accel = this.steer === 0 ? CFG.DRILL_AX * 0.85 : CFG.DRILL_AX;
     this.vx += U.clamp(want - this.vx, -accel * dt, accel * dt);
     this.vx *= Math.exp(-1.4 * dt);
@@ -144,11 +164,13 @@ class Pod {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
-    /* walls */
+    /* Walls. The old -0.25 rebound threw the drill back off the edge of the field, which
+       reads as a mistake being punished twice; now it just stops dead against the rock and
+       the player keeps whatever input they are holding. */
     const lo = ug.centerX - ug.halfW + this.r;
     const hi = ug.centerX + ug.halfW - this.r;
-    if (this.x < lo) { this.x = lo; this.vx *= -0.25; }
-    if (this.x > hi) { this.x = hi; this.vx *= -0.25; }
+    if (this.x < lo) { this.x = lo; this.vx = 0; }
+    if (this.x > hi) { this.x = hi; this.vx = 0; }
 
     /* Point the nose down the ACTUAL velocity vector. A capped fake lean made the pod
        crab sideways ~15 deg off its own path, which reads as the tail wagging. */
@@ -159,21 +181,19 @@ class Pod {
     this.angle = angleDamp(this.angle, target, 14, dt);
     this.spin += dt * 34;
 
-    /* carve the tunnel */
-    const tn = ug.tunnel;
-    if (!tn.length || Math.hypot(this.x - tn[tn.length - 1].x, this.y - tn[tn.length - 1].y) > 9)
-      tn.push({ x: this.x, y: this.y });
+    /* carve the tunnel. The powered drill bores a clean, constant, NARROW hole — the
+       contrast against the torn impact tunnel above is the point, so barely any raggedness
+       and a bore that widens only a little when the pod is steering hard. */
+    const bore = CFG.TUNNEL_R_MIN * (1 + Math.abs(this.vx) / 320);
+    World.stampTunnel(ug, this.x, this.y, bore, 0.35);
 
     /* collisions */
-    /* a full pod leaves minerals in the ground */
-    if (cb.canCollect()) {
-      for (const m of ug.minerals) {
-        if (m.got) continue;
-        if (Math.hypot(m.x - this.x, m.y - this.y) < this.r + m.r + 2) {
-          m.got = true;
-          cb.mineral(m);
-          if (!cb.canCollect()) break;
-        }
+    /* no carry cap: the pod takes everything it touches */
+    for (const m of ug.minerals) {
+      if (m.got) continue;
+      if (Math.hypot(m.x - this.x, m.y - this.y) < this.r + m.r + 2) {
+        m.got = true;
+        cb.mineral(m);
       }
     }
     for (const r of ug.rocks) {
@@ -263,6 +283,14 @@ class Pod {
     ctx.lineWidth = 2;
     U.rr(ctx, -R * 1.5, -R * 0.82, R * 2.2, R * 1.64, R * 0.8);
     ctx.stroke();
+
+    /* Skid plate. The pod flares and lands on THIS, never on the bit, so the belly needs
+       to look like the part built to take a landing. Without it the flare just looks like
+       the pod tipping back for no reason. */
+    ctx.fillStyle = '#39455f';
+    U.rr(ctx, -R * 1.3, R * 0.46, R * 1.95, R * 0.44, R * 0.2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.2)';
+    U.rr(ctx, -R * 1.18, R * 0.53, R * 1.5, R * 0.13, R * 0.065); ctx.fill();
 
     /* energy accents */
     ctx.save();

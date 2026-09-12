@@ -3,6 +3,11 @@
 /* one font stack shared by CSS and canvas so DOM and drawn text always match */
 const FONT = '"Fredoka", "Trebuchet MS", Verdana, system-ui, sans-serif';
 
+/* Shown at the bottom of the debug panel. Bump it with any change worth play-testing, so
+   "is the build I'm looking at the one that was just edited?" is answerable at a glance
+   instead of by guessing at the browser cache. */
+const BUILD = '12 Sep · skyline scale';
+
 
 const U = {
   TAU: Math.PI * 2,
@@ -73,7 +78,17 @@ const U = {
   },
 
   /* colours */
+  /* Accepts '#rgb', '#rrggbb' AND 'rgb(r,g,b)'. That last form is not decoration: U.mix
+     RETURNS 'rgb(...)', so any mixed colour handed back to hex() used to parse as NaN and
+     come out (0,0,0). Every atmosphere blend band is a mix, which is why the mountains
+     turned black for the 72 metres either side of each atmosphere change and were fine
+     everywhere else — a bug that only ever showed up in a narrow strip of the world. */
   hex(h) {
+    const m = /^rgba?\(([^)]+)\)$/.exec(h);
+    if (m) {
+      const p = m[1].split(',');
+      return [+p[0] | 0, +p[1] | 0, +p[2] | 0];
+    }
     h = h.replace('#', '');
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
     const n = parseInt(h, 16);
@@ -88,6 +103,47 @@ const U = {
     const [r, g, b] = typeof c === 'string' ? U.hex(c) : c;
     return `rgba(${r},${g},${b},${a})`;
   },
+  /* Mixing two colours in RGB cannot carry a hue across: a brown soil mixed halfway into a
+     dark blue plain stays brown, because darkening the target toward black strips the very
+     saturation that would have pulled the hue over. Measured on this game's own palettes,
+     a straight 50% mix left the ground 174 degrees of hue away from its sky in SKYRIDGE
+     while looking fine in the desert, purely because the desert already matched.
+     So tint in HSL and be explicit about what moves: hue and saturation travel toward the
+     target, LIGHTNESS stays the base's own. That is what keeps soil reading as solid
+     ground under any sky instead of turning into a patch of the sky. */
+  rgb2hsl(c) {
+    const [r, g, b] = U.hex(c).map((v) => v / 255);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    const l = (mx + mn) / 2;
+    if (d < 1e-6) return { h: 0, s: 0, l };
+    const s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return { h: ((h * 60) + 360) % 360, s, l };
+  },
+  hsl2rgb(h, s, l) {
+    /* k first, and x from k. Deriving x from the raw hue is the trap: a tint that rotates
+       the short way round the colour wheel routinely hands this a NEGATIVE hue, JS keeps
+       the sign through %, and the channel comes out negative — measured once as
+       rgb(-72,48,111). The clamp at the end is belt and braces. */
+    const k = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((k / 60) % 2) - 1));
+    const m = l - c / 2;
+    const v = k < 60 ? [c, x, 0] : k < 120 ? [x, c, 0] : k < 180 ? [0, c, x]
+            : k < 240 ? [0, x, c] : k < 300 ? [x, 0, c] : [c, 0, x];
+    const ch = (n) => Math.max(0, Math.min(255, Math.round((n + m) * 255)));
+    return `rgb(${ch(v[0])},${ch(v[1])},${ch(v[2])})`;
+  },
+  /* pull `c` toward `target`'s hue and saturation, keeping `c`'s own lightness */
+  tint(c, target, hAmt, sAmt, lAdj) {
+    const a = U.rgb2hsl(c), b = U.rgb2hsl(target);
+    let dh = b.h - a.h;
+    if (dh > 180) dh -= 360;
+    if (dh < -180) dh += 360;      // always rotate the short way round
+    const h = b.s < 0.02 ? a.h : a.h + dh * hAmt;
+    return U.hsl2rgb(h, U.lerp(a.s, b.s, sAmt), U.clamp(a.l + (lAdj || 0), 0, 1));
+  },
+
   shade(c, amt) {
     const [r, g, b] = U.hex(c);
     const f = amt < 0 ? 0 : 255;
