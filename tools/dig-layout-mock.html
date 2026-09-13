@@ -1,0 +1,1073 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill Orbit — Dig Layout Mock</title>
+<style>
+  :root {
+    --ink: #0d1017; --panel: #161b26; --line: #2a3140; --text: #dde3ee;
+    --dim: #8b95a8; --hot: #ffc82e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ink); color: var(--text);
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .04em; }
+  h2 { font-size: 12px; margin: 0 0 10px; color: var(--dim); letter-spacing: .12em; text-transform: uppercase; }
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  .col { flex: 1 1 320px; min-width: 0; }
+
+  /* ---- controls ---- */
+  .ctl { display: grid; grid-template-columns: 132px 1fr 54px; gap: 6px 10px; align-items: center; margin-bottom: 5px; }
+  .ctl label { color: var(--dim); }
+  .ctl output { text-align: right; color: var(--hot); }
+  input[type=range] { width: 100%; accent-color: #6ef0ff; }
+  input[type=number], select, textarea {
+    background: #0d1219; color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 6px; font: inherit;
+  }
+  textarea { width: 100%; height: 108px; resize: vertical; }
+  button {
+    background: #22304a; color: var(--text); border: 1px solid #38496b;
+    border-radius: 5px; padding: 6px 11px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #2c3d5e; }
+  button.on { background: #6ef0ff; border-color: #6ef0ff; color: #06202a; }
+  .bar { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-bottom: 10px; }
+
+  /* ---- gallery ---- */
+  #gallery { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+  .thumb { background: #0d1219; border: 1px solid var(--line); border-radius: 5px; padding: 5px; cursor: pointer; }
+  .thumb.sel { border-color: #6ef0ff; }
+  .thumb canvas { width: 100%; display: block; image-rendering: auto; }
+  .thumb .cap { color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; padding-top: 3px; }
+
+  /* ---- detail + drive ---- */
+  #detailCv, #driveCv { background: #0d1219; border: 1px solid var(--line); border-radius: 5px; display: block; max-width: 100%; }
+  #stats { font-size: 12px; }
+  #stats table { border-collapse: collapse; width: 100%; }
+  #stats td { padding: 1px 0; }
+  #stats td:last-child { text-align: right; color: var(--hot); }
+  #stats .sub { color: var(--dim); }
+  .hint { color: var(--dim); font-size: 11px; margin-top: 6px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="panel">
+    <h1>Drill Orbit — Dig Layout Mock</h1>
+    <div class="hint">Alat coretan. Bandingin lapangan mineral "rata" lawan "urat + kantong", terus coba nyetir sendiri.</div>
+  </div>
+
+  <!-- ============ PARAMETER ============ -->
+  <div class="panel">
+    <h2>Parameter</h2>
+    <div class="row">
+      <div class="col" id="ctlA"></div>
+      <div class="col" id="ctlB"></div>
+      <div class="col" style="flex:1 1 300px">
+        <div class="bar">
+          <button id="btnReset">reset ke default</button>
+          <button id="btnApplyJson">terapkan JSON</button>
+        </div>
+        <textarea id="json" spellcheck="false"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ A. GALERI ============ -->
+  <div class="panel">
+    <h2>A · Galeri</h2>
+    <div class="bar">
+      <button id="mFlat">rata</button>
+      <button id="mVein" class="on">urat + kantong</button>
+      <span style="width:14px"></span>
+      <label style="color:var(--dim)">seed dasar</label>
+      <input type="number" id="seedIn" value="1337" style="width:110px">
+      <button id="btnSeed">seed baru</button>
+      <span class="hint" style="margin:0">12 seed berurutan · klik buat buka di panel B</span>
+    </div>
+    <div id="gallery"></div>
+  </div>
+
+  <!-- ============ B. DETAIL ============ -->
+  <div class="panel">
+    <h2>B · Detail</h2>
+    <div class="bar">
+      <button id="btnCone" class="on">kerucut jangkauan</button>
+      <button id="btnBot" class="on">bot serakah</button>
+      <button id="btnPlay">main (coba nyetir)</button>
+      <span class="hint" style="margin:0">klik di lapangan buat mindahin titik kerucut</span>
+    </div>
+    <div class="row">
+      <div style="flex:0 0 auto"><canvas id="detailCv"></canvas></div>
+      <div class="col" id="stats"></div>
+    </div>
+  </div>
+
+  <!-- ============ C. COBA NYETIR ============ -->
+  <div class="panel hidden" id="drivePanel">
+    <h2>C · Coba nyetir</h2>
+    <div class="bar">
+      <button id="btnRetry">ulang (seed sama)</button>
+      <button id="btnNextSeed">seed berikutnya</button>
+      <button id="btnStop">tutup</button>
+      <span class="hint" style="margin:0">tahan ← → atau drag kiri/kanan (relatif dari titik sentuh, full lock 62 px)</span>
+    </div>
+    <canvas id="driveCv" width="620" height="620"></canvas>
+    <div id="driveOut" class="hint"></div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+/* ============================================================================
+   DRILL ORBIT — DIG LAYOUT MOCK
+
+   Apa ini: alat coretan satu file buat ngeliat cepat 12 variasi lapangan mineral
+   bawah tanah SEBELUM ada yang dibangun di game asli. Nol dependency, buka
+   langsung di browser. Nggak ada file lain di repo yang disentuh.
+
+   Cara pakai: buka file-nya. Panel A nunjukin 12 lapangan dari seed berurutan;
+   tombol "rata" / "urat + kantong" nggambar ulang 12-12nya pakai seed yang SAMA
+   biar bisa dibandingin langsung. Klik salah satu buat masuk panel B — di situ
+   ada kerucut jangkauan, jalur bot serakah, dan angkanya. Tombol "main" buat
+   nyetir sendiri (tahan panah, atau drag). Semua slider langsung ngubah hasil;
+   parameter sama + seed sama = gambar sama persis (mulberry32, sama kayak
+   js/utils.js). Di console: `sweep(24)` buat ngukur ulang angka di bawah ini.
+
+   Angka yang dipakai: "nilai diambil bot" = nilai dasar mineral yang berhasil
+   diambil bot serakah, dibagi total nilai di lapangan. Makin mendekati 100%,
+   makin nggak ada yang perlu dipilih — jalur serakah dan jalur terbaik jadi
+   jalur yang sama. Sengaja pakai nilai DASAR dua-duanya, karena chain
+   multiplier bisa bikin koin bot lewat dari total dan rasionya jadi ngibul.
+
+   -- HASIL 24 SEED (default, biome Grassland) --------------------------------
+   Kedalaman jauh lebih ngaruh daripada resep layout-nya:
+       38 m (Lv1)   rata 24%   urat 20%
+       80 m         rata 24%   urat 36%
+   Jadi di lapangan dangkal, urat malah bikin bot LEBIH susah; di lapangan dalam
+   urat bikin bot lebih gampang. Masuk akal: 38 m cuma 8 baris, urat belum sempet
+   jadi garis. Di 80 m urat udah 20+ baris — begitu bot nempel, dia tinggal ikutin
+   sampai dasar, dan garis serakah = garis terbaik.
+
+   Ranking parameter (selisih ujung ke ujung, di 80 m):
+       jumlah urat    1:48%  2:46%  3:36%  5:36%   <- paling ngaruh
+       radius ambil  20:34%  31:36%  50:44%        <- kuat, tapi ini jangkauan, bukan layout
+       naik tier      0:30%  0.35:36%  1:39%
+       jumlah kantong 0:40%  2:36%  4:37%          <- nyaris nggak ngaruh
+       gerbang / batu nyasar / balik arah / kemurnian / biome: +-2%, noise
+   "mineral nyasar" keliatan nurunin angka (41% -> 31% di 0.20) tapi itu jebakan:
+   dia cuma nambah mineral murah di luar jalur yang emang nggak dikejar bot.
+   Turun persennya, pilihannya nggak nambah.
+
+   Yang perlu dicatat: bot serakah itu LANTAI, bukan langit-langit. Nyetir
+   zig-zag asal-asalan ngalahin dia di 11 dari 24 seed pas 38 m, tapi cuma 5 dari
+   24 pas 80 m. Artinya resep ini malah ngasih pilihan pas DRILL masih Lv1 dan
+   ngilangin pilihan begitu DRILL naik — kebalik dari yang dimau.
+   Kantong, yang niatnya jadi "belokan yang harus dipilih", nggak kebukti sama
+   sekali di angka.
+
+   -- ASUMSI (spec-nya ada yang kepotong, ini bacaan paling sederhana) ---------
+   - 13 kolom, persis seperti diminta. Generator yang live sebenernya ngasih 14
+     (ujungnya inklusif: -300..+298 step 46); selisih satu kolom nggak ngubah
+     kesimpulan apa pun di sini.
+   - Radius ambil default 31 px = podR 19 + mineralR 10 + 2, sama kayak
+     Pod.updateDrill di js/player.js. Spec nyebut 35; itu ada slidernya.
+   - Drag lateral `vx *= exp(-1.4*dt)` dari game asli TIDAK dipakai, biar full
+     lock pas 40 px per 30 px baris seperti yang diminta. Di game asli jangkauan
+     efektifnya jadi ~2% lebih sempit dari yang keliatan di sini.
+   - Giling batu 0.6 s @ 20% kecepatan (spec), bukan 0.28 s @ 32% (game asli).
+   - Pod mulai di tengah, y = 0 (garis permukaan), jadi ada 74 px kosong sebelum
+     baris pertama — sama kayak lapangan asli.
+   ========================================================================== */
+
+/* ---------------- mineral + pool, dari js/world.js ---------------- */
+const MINERALS = {
+  coal:    { name: 'COAL',    value: 2,   color: '#3d4152', edge: '#6a7086', tier: 0 },
+  copper:  { name: 'COPPER',  value: 4,   color: '#e08040', edge: '#ffb37a', tier: 0 },
+  iron:    { name: 'IRON',    value: 6,   color: '#aab6c4', edge: '#e2ecf5', tier: 0 },
+  gold:    { name: 'GOLD',    value: 12,  color: '#ffc82e', edge: '#fff0a8', tier: 1 },
+  ruby:    { name: 'RUBY',    value: 20,  color: '#ff3f6b', edge: '#ff9db3', tier: 1 },
+  diamond: { name: 'DIAMOND', value: 50,  color: '#6ef0ff', edge: '#e6ffff', tier: 2 },
+  fossil:  { name: 'FOSSIL',  value: 75,  color: '#f0e0b8', edge: '#fffbe8', tier: 2 },
+  alien:   { name: 'ALIEN',   value: 150, color: '#b06bff', edge: '#e7c6ff', tier: 2 },
+};
+/* Draw order is load-bearing: the running weight total makes the pick
+   order-sensitive, exactly as the prototype's `for..in` over the pool object. */
+const ORDER = ['coal', 'copper', 'iron', 'gold', 'ruby', 'diamond', 'fossil', 'alien'];
+const BY_TIER = [
+  ORDER.filter((k) => MINERALS[k].tier === 0),
+  ORDER.filter((k) => MINERALS[k].tier === 1),
+  ORDER.filter((k) => MINERALS[k].tier === 2),
+];
+
+const POOLS = {
+  grass:   { coal: 5,   copper: 4.2, iron: 3,   gold: 1.2, ruby: 0.5, diamond: 0.16, fossil: 0.12, alien: 0.05 },
+  desert:  { coal: 1.8, copper: 3,   iron: 3,   gold: 3.6, ruby: 2,   diamond: 0.4,  fossil: 1.3,  alien: 0.16 },
+  volcano: { coal: 1,   copper: 1.4, iron: 2.4, gold: 2.4, ruby: 3.4, diamond: 1.9,  fossil: 0.9,  alien: 0.8 },
+};
+
+/* ---------------- geometry, from genUnderground ---------------- */
+const GEO = {
+  M: 8,              // px per metre
+  HALF_W: 300,       // field half width
+  COL_STEP: 46,
+  COLS: 13,
+  ROW_STEP: 30,
+  TOP_Y: 74,         // first row, below the surface line
+  JIT_X: 12,         // +- per cell
+  JIT_Y: 8,
+  MIN_R: 10,
+  ROCK_R0: 11, ROCK_R1: 20,
+  POD_R: 19,
+  VY_TOP: 50, VY_DEEP: 78,
+  STEER_RATIO: 1.35,
+  STEER_AX: 420,
+  TURN_COST: 0.12,
+  DRAG_RANGE: 62,    // px of drag for full lock, touch input
+  GRIND_T: 0.6,      // seconds
+  GRIND_MULT: 0.2,
+  CHAIN_WINDOW: 1.2,
+};
+/* ---------------- rng, same stream as js/utils.js ---------------- */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rInt = (rng, a, b) => a + Math.floor(rng() * (b - a + 1));
+const rRange = (rng, a, b) => a + rng() * (b - a);
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+
+/* ---------------- parameters ---------------- */
+const DEFAULTS = {
+  depthM: 38,
+  biome: 'grass',
+  veins: 3,
+  veinReverse: 0.15,
+  veinPurity: 0.80,
+  veinLenMin: 0.60,
+  veinLenMax: 1.00,
+  tierUp: 0.35,
+  pockets: 2,
+  pocketMin: 4,
+  pocketMax: 6,
+  gateMin: 5,
+  gateMax: 8,
+  strayRock: 0.03,
+  scatter: 0.04,
+  pickupR: 31,
+};
+const SLIDERS = [
+  ['depthM',      'kedalaman (m)',      38, 120, 1,    'A'],
+  ['veins',       'jumlah urat',         1,   5, 1,    'A'],
+  ['veinReverse', 'urat balik arah',     0, 0.5, 0.01, 'A'],
+  ['veinPurity',  'kemurnian urat',    0.4,   1, 0.01, 'A'],
+  ['veinLenMin',  'panjang urat min',  0.3,   1, 0.01, 'A'],
+  ['veinLenMax',  'panjang urat max',  0.3,   1, 0.01, 'A'],
+  ['tierUp',      'naik tier / dalam',   0,   1, 0.01, 'A'],
+  ['pockets',     'jumlah kantong',      0,   4, 1,    'B'],
+  ['pocketMin',   'isi kantong min',     2,   8, 1,    'B'],
+  ['pocketMax',   'isi kantong max',     2,  10, 1,    'B'],
+  ['gateMin',     'gerbang tiap (dalam)',2,  12, 1,    'B'],
+  ['gateMax',     'gerbang tiap (atas)', 2,  16, 1,    'B'],
+  ['strayRock',   'batu nyasar',         0, 0.2, 0.005,'B'],
+  ['scatter',     'mineral nyasar',      0, 0.2, 0.005,'B'],
+  ['pickupR',     'radius ambil (px)',  20,  50, 1,    'B'],
+];
+let P = { ...DEFAULTS };
+let MODE = 'vein';          // 'flat' | 'vein'
+let BASE_SEED = 1337;
+let SELECTED = 0;
+
+/* ============================================================================
+   GENERATORS
+   Both write the same shape: { minerals, rocks, rows, height, meta }.
+   Coordinates are relative to the field: x = 0 is the centre column's axis,
+   y = 0 is the surface line.
+   ========================================================================== */
+
+function rowsFor(depthM) {
+  const bot = depthM * GEO.M;
+  return Math.max(1, Math.ceil((bot - 6 - GEO.TOP_Y) / GEO.ROW_STEP));
+}
+const colX = (c) => -GEO.HALF_W + c * GEO.COL_STEP;
+const rowY = (r) => GEO.TOP_Y + r * GEO.ROW_STEP;
+
+/* Weighted draw that shifts with depth: commons fade, uncommons rise, rares
+   climb steeply. Consumes exactly one rng draw, after building the table. */
+function pickMineral(rng, t, pool, rareBoost) {
+  const acc = [];
+  let total = 0;
+  for (const k of ORDER) {
+    let v = pool[k];
+    const tier = MINERALS[k].tier;
+    if (tier === 0) v *= 1.35 - 0.9 * t;
+    else if (tier === 1) v *= 0.55 + 1.1 * t;
+    else v *= (0.18 + 1.9 * t) * rareBoost;
+    total += v;
+    acc.push(total);
+  }
+  const r = rng() * total;
+  for (let i = 0; i < acc.length; i++) if (r <= acc[i]) return ORDER[i];
+  return ORDER[0];
+}
+
+/* One mineral of a given tier, weighted inside that tier by the biome pool. */
+function pickOfTier(rng, tier, pool) {
+  const ks = BY_TIER[clamp(tier, 0, 2)];
+  let total = 0;
+  const acc = [];
+  for (const k of ks) { total += pool[k]; acc.push(total); }
+  const r = rng() * total;
+  for (let i = 0; i < acc.length; i++) if (r <= acc[i]) return ks[i];
+  return ks[0];
+}
+
+/* ---------------- the OLD generator, kept only as a yardstick ----------------
+   One roll per cell: < 0.20 rock, < 0.54 mineral, otherwise empty. It is what
+   "rata" means — every cell is an independent coin flip, so there is no shape
+   for the eye to follow and nothing to steer AT. */
+function genFlat(seed, p) {
+  const rng = mulberry32(seed);
+  const pool = POOLS[p.biome];
+  const rows = rowsFor(p.depthM);
+  const minerals = [], rocks = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < GEO.COLS; c++) {
+      const px = colX(c) + (rng() - 0.5) * GEO.JIT_X * 2;
+      const py = rowY(r) + (rng() - 0.5) * GEO.JIT_Y * 2;
+      const t = clamp(py / GEO.M / Math.max(22, p.depthM), 0, 1);
+      const roll = rng();
+      if (roll < 0.20) {
+        rocks.push({ x: px, y: py, r: GEO.ROCK_R0 + rng() * (GEO.ROCK_R1 - GEO.ROCK_R0), tag: 'stray' });
+      } else if (roll < 0.54) {
+        minerals.push({ x: px, y: py, r: GEO.MIN_R, type: pickMineral(rng, t, pool, 1), tag: 'flat' });
+      }
+    }
+  }
+  return finish(seed, p, rows, minerals, rocks, { veins: [], pockets: [] });
+}
+
+/* ---------------- the NEW generator: veins + pockets ----------------
+   Same 13 x N grid, but the contents are PLACED rather than rolled. The whole
+   point is that empty space has a shape: a vein is a line the eye can follow
+   and the drill can just barely hold, and a pocket is a payoff you can see from
+   above and have to commit to. */
+function genVein(seed, p) {
+  const rng = mulberry32(seed);
+  const pool = POOLS[p.biome];
+  const rows = rowsFor(p.depthM);
+
+  // grid[r][c] = null | { kind, type, tier, tag }
+  const grid = [];
+  for (let r = 0; r < rows; r++) grid.push(new Array(GEO.COLS).fill(null));
+  const veinAt = [];
+  for (let r = 0; r < rows; r++) veinAt.push(new Array(GEO.COLS).fill(-1));
+
+  /* ---- 1. veins ---- */
+  const veins = [];
+  const starts = [];
+  for (let v = 0; v < p.veins; v++) {
+    // Starts stay >= 3 columns apart so two veins never read as one thick band.
+    let col = -1;
+    for (let a = 0; a < 24; a++) {
+      const c = rInt(rng, 0, GEO.COLS - 1);
+      if (starts.every((s) => Math.abs(s - c) >= 3)) { col = c; break; }
+    }
+    if (col < 0) continue;
+    starts.push(col);
+
+    const startRow = rInt(rng, 0, 2);
+    let drift = rng() < 0.5 ? -1 : 1;
+    const len = Math.round(rows * rRange(rng, p.veinLenMin, p.veinLenMax));
+    const endRow = Math.min(rows - 1, startRow + len);
+    let dom = pickMineral(rng, clamp(rowY(startRow) / GEO.M / Math.max(22, p.depthM), 0, 1), pool, 1);
+
+    const cells = [];
+    for (let r = startRow; r <= endRow; r++) {
+      cells.push({ r, c: col });
+      if (rng() < p.veinReverse) drift = -drift;
+      // biased step: mostly with the drift, sometimes straight, rarely against
+      const q = rng();
+      const step = q < 0.55 ? drift : q < 0.85 ? 0 : -drift;
+      col = clamp(col + step, 0, GEO.COLS - 1);
+      // deeper down, the dominant type climbs a tier
+      const t = clamp(rowY(r) / GEO.M / Math.max(22, p.depthM), 0, 1);
+      if (rng() < p.tierUp * t) {
+        const nt = Math.min(2, MINERALS[dom].tier + 1);
+        dom = pickOfTier(rng, nt, pool);
+      }
+    }
+
+    veins.push({ dom, cells });
+
+    for (const cell of cells) {
+      const t = clamp(rowY(cell.r) / GEO.M / Math.max(22, p.depthM), 0, 1);
+      const prev = veinAt[cell.r][cell.c];
+      if (prev >= 0 && prev !== v) {
+        // A crossing pays: one tier above whatever is already sitting there.
+        const cur = grid[cell.r][cell.c];
+        const up = Math.min(2, (cur && cur.type ? MINERALS[cur.type].tier : 0) + 1);
+        grid[cell.r][cell.c] = { kind: 'min', type: pickOfTier(rng, up, pool), tag: 'cross' };
+        continue;
+      }
+      veinAt[cell.r][cell.c] = v;
+      // 80% the vein's own type, 20% a neighbour, so it reads as ore rather
+      // than as a ruled line.
+      const type = rng() < p.veinPurity ? dom : pickMineral(rng, t, pool, 1);
+      grid[cell.r][cell.c] = { kind: 'min', type, tag: 'vein' };
+    }
+  }
+
+  /* ---- 2. pockets, bottom half only ---- */
+  const pockets = [];
+  for (let i = 0; i < p.pockets; i++) {
+    let cr = -1, cc = -1;
+    for (let a = 0; a < 30; a++) {
+      const r = rInt(rng, Math.floor(rows / 2), Math.max(Math.floor(rows / 2), rows - 3));
+      const c = rInt(rng, 1, GEO.COLS - 2);
+      // Never next to a vein: a pocket has to be a DETOUR, not a bonus you
+      // collect by staying on the line you were already following.
+      let clear = true;
+      for (let rr = r - 2; rr <= r + 2 && clear; rr++) {
+        if (rr < 0 || rr >= rows) continue;
+        for (let ccx = c - 2; ccx <= c + 2; ccx++) {
+          if (ccx < 0 || ccx >= GEO.COLS) continue;
+          if (veinAt[rr][ccx] >= 0) { clear = false; break; }
+        }
+      }
+      if (clear) { cr = r; cc = c; break; }
+    }
+    if (cr < 0) continue;
+
+    const t = clamp(rowY(cr) / GEO.M / Math.max(22, p.depthM), 0, 1);
+    const rareBias = p.biome === 'volcano' ? 0.35 : p.biome === 'desert' ? 0.2 : 0.08;
+    const tier = rng() < rareBias + t * 0.45 ? 2 : 1;
+    const type = pickOfTier(rng, tier, pool);
+    const n = rInt(rng, p.pocketMin, Math.max(p.pocketMin, p.pocketMax));
+
+    // blob within ~1.5 cells of the centre
+    const spots = [];
+    for (let rr = cr - 1; rr <= cr + 1; rr++) {
+      for (let ccx = cc - 1; ccx <= cc + 1; ccx++) {
+        if (rr < 0 || rr >= rows || ccx < 0 || ccx >= GEO.COLS) continue;
+        if (Math.abs(rr - cr) + Math.abs(ccx - cc) > 2) continue;
+        spots.push({ r: rr, c: ccx });
+      }
+    }
+    // deterministic shuffle
+    for (let s = spots.length - 1; s > 0; s--) {
+      const j = Math.floor(rng() * (s + 1));
+      const tmp = spots[s]; spots[s] = spots[j]; spots[j] = tmp;
+    }
+    const blob = spots.slice(0, Math.min(n, spots.length));
+    const inBlob = new Set(blob.map((b) => b.r + ':' + b.c));
+    for (const b of blob) grid[b.r][b.c] = { kind: 'min', type, tag: 'pocket' };
+
+    // ring of rocks, with one gap ALWAYS at the top so the pocket can be entered
+    const ring = [];
+    for (const b of blob) {
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const rr = b.r + dr, ccx = b.c + dc;
+          if (rr < 0 || rr >= rows || ccx < 0 || ccx >= GEO.COLS) continue;
+          const key = rr + ':' + ccx;
+          if (inBlob.has(key)) continue;
+          if (!ring.some((x) => x.r === rr && x.c === ccx)) ring.push({ r: rr, c: ccx });
+        }
+      }
+    }
+    let gap = null;
+    for (const cell of ring) {
+      if (!gap || cell.r < gap.r || (cell.r === gap.r && Math.abs(cell.c - cc) < Math.abs(gap.c - cc))) gap = cell;
+    }
+    for (const cell of ring) {
+      if (gap && cell.r === gap.r && cell.c === gap.c) continue;
+      if (grid[cell.r][cell.c]) continue;         // never overwrite a vein
+      grid[cell.r][cell.c] = { kind: 'rock', tag: 'ring' };
+    }
+    pockets.push({ r: cr, c: cc, type, count: blob.length });
+  }
+
+  /* ---- 3. rocks: gates along each vein, then strays ---- */
+  for (const v of veins) {
+    let next = v.cells.length ? v.cells[0].r + rInt(rng, p.gateMin, Math.max(p.gateMin, p.gateMax)) : 1e9;
+    for (let i = 0; i < v.cells.length; i++) {
+      const cell = v.cells[i];
+      if (cell.r < next) continue;
+      // A gate sits ON the line: grind through it, or step off and give up the
+      // one or two nodes you would have swept past.
+      if (grid[cell.r][cell.c] && grid[cell.r][cell.c].tag !== 'cross') {
+        grid[cell.r][cell.c] = { kind: 'rock', tag: 'gate' };
+      }
+      if (rng() < 0.5 && i + 1 < v.cells.length) {
+        const nx = v.cells[i + 1];
+        if (grid[nx.r][nx.c] && grid[nx.r][nx.c].tag !== 'cross') grid[nx.r][nx.c] = { kind: 'rock', tag: 'gate' };
+      }
+      // Gates crowd together with depth: loose up top, tight at the bottom.
+      const t = clamp(cell.r / Math.max(1, v.cells[v.cells.length - 1].r), 0, 1);
+      next = cell.r + Math.max(2, Math.round(lerp(p.gateMax, p.gateMin, t)));
+    }
+  }
+  for (let r = 4; r < rows; r++) {
+    for (let c = 0; c < GEO.COLS; c++) {
+      if (grid[r][c]) continue;
+      if (rng() < p.strayRock) grid[r][c] = { kind: 'rock', tag: 'stray' };
+    }
+  }
+
+  /* ---- 4. scatter, so empty ground is not dead ground ---- */
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < GEO.COLS; c++) {
+      if (grid[r][c]) continue;
+      if (rng() < p.scatter) grid[r][c] = { kind: 'min', type: pickOfTier(rng, 0, pool), tag: 'scatter' };
+    }
+  }
+
+  /* ---- 5. same jitter as the old generator ---- */
+  const minerals = [], rocks = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < GEO.COLS; c++) {
+      const cell = grid[r][c];
+      if (!cell) continue;
+      const px = colX(c) + (rng() - 0.5) * GEO.JIT_X * 2;
+      const py = rowY(r) + (rng() - 0.5) * GEO.JIT_Y * 2;
+      if (cell.kind === 'min') minerals.push({ x: px, y: py, r: GEO.MIN_R, type: cell.type, tag: cell.tag });
+      else rocks.push({ x: px, y: py, r: GEO.ROCK_R0 + rng() * (GEO.ROCK_R1 - GEO.ROCK_R0), tag: cell.tag });
+    }
+  }
+  return finish(seed, p, rows, minerals, rocks, { veins, pockets });
+}
+
+function finish(seed, p, rows, minerals, rocks, meta) {
+  const height = p.depthM * GEO.M;
+  let totalCoins = 0;
+  const tiers = [0, 0, 0];
+  for (const m of minerals) { totalCoins += MINERALS[m.type].value; tiers[MINERALS[m.type].tier]++; }
+  const cells = rows * GEO.COLS;
+  return {
+    seed, params: { ...p }, rows, height, minerals, rocks,
+    veins: meta.veins, pockets: meta.pockets,
+    stats: {
+      tiers, totalCoins, cells,
+      emptyPct: Math.round(100 * (1 - (minerals.length + rocks.length) / cells)),
+      gates: rocks.filter((r) => r.tag === 'gate').length,
+      rings: rocks.filter((r) => r.tag === 'ring').length,
+    },
+  };
+}
+
+const genField = (seed, p, mode) => (mode === 'flat' ? genFlat(seed, p) : genVein(seed, p));
+
+/* ============================================================================
+   SIM — shared by the greedy bot and by hand-driving
+   ========================================================================== */
+/* Sideways travel per px of descent at full lock: 40 px across one 30 px row.
+   One column is 46 px, so a vein that drifts a full column every row is asking
+   for 115% of what the drill can do — followable, but only by cutting every
+   corner. That gap is the whole reason a vein reads as a line you CHASE. */
+const REACH_PER_PX = 40 / 30;
+
+function newRun(field) {
+  return {
+    x: 0, y: 0, vx: 0, vy: 0,
+    got: new Set(), dead: new Set(),
+    /* `coins` carries the chain multiplier and `base` does not. Both are needed:
+       the ratio against the field's total has to be base-against-base or a good
+       chain pushes it past 100% of a field the bot did not actually clear. */
+    grind: 0, coins: 0, base: 0, chain: 0, chainT: 0, bestChain: 0,
+    path: [{ x: 0, y: 0 }],
+    done: false,
+  };
+}
+
+/* One step. `steer` is -1..1. Returns nothing; mutates `s`. */
+function stepRun(field, s, steer, dt) {
+  if (s.done) return;
+  const p = field.params;
+  const t = clamp(s.y / Math.max(80, field.height), 0, 1);
+  let targetVy = lerp(GEO.VY_TOP, GEO.VY_DEEP, t);
+  targetVy *= 1 - GEO.TURN_COST * Math.abs(steer);
+  if (s.grind > 0) { targetVy *= GEO.GRIND_MULT; s.grind -= dt; }
+
+  s.vy += (targetVy - s.vy) * (1 - Math.exp(-6 * dt));
+  const want = steer * targetVy * GEO.STEER_RATIO;
+  const d = want - s.vx;
+  const step = GEO.STEER_AX * dt;
+  s.vx += clamp(d, -step, step);
+
+  s.x += s.vx * dt;
+  s.y += s.vy * dt;
+
+  const lo = -GEO.HALF_W + GEO.POD_R, hi = GEO.HALF_W - GEO.POD_R;
+  if (s.x < lo) { s.x = lo; s.vx = 0; }
+  if (s.x > hi) { s.x = hi; s.vx = 0; }
+  s.path.push({ x: s.x, y: s.y });
+
+  if (s.chainT > 0) { s.chainT -= dt; if (s.chainT <= 0) s.chain = 0; }
+
+  for (let i = 0; i < field.minerals.length; i++) {
+    if (s.got.has(i)) continue;
+    const m = field.minerals[i];
+    if (Math.hypot(m.x - s.x, m.y - s.y) > p.pickupR) continue;
+    s.got.add(i);
+    s.chain = s.chainT > 0 ? s.chain + 1 : 1;
+    s.chainT = GEO.CHAIN_WINDOW;
+    s.bestChain = Math.max(s.bestChain, s.chain);
+    s.base += MINERALS[m.type].value;
+    s.coins += Math.round(MINERALS[m.type].value * Math.min(3, 1 + 0.5 * (s.chain - 1)));
+  }
+  for (let i = 0; i < field.rocks.length; i++) {
+    if (s.dead.has(i)) continue;
+    const r = field.rocks[i];
+    if (Math.hypot(r.x - s.x, r.y - s.y) > GEO.POD_R + r.r) continue;
+    s.dead.add(i);
+    s.grind = GEO.GRIND_T;
+  }
+
+  if (s.y >= field.height) { s.y = field.height; s.done = true; }
+}
+
+/* The greedy bot: always turn toward the nearest uncollected mineral that is
+   still inside the reach cone. This is the whole point of the tool. If a bot
+   this stupid already sweeps most of the field, the layout is not asking the
+   player to choose — and that shows up as a number, not as a feeling. */
+function greedyRun(field) {
+  const s = newRun(field);
+  const dt = 1 / 60;
+  for (let i = 0; i < 20000 && !s.done; i++) {
+    let best = -1, bestD = 1e9;
+    for (let j = 0; j < field.minerals.length; j++) {
+      if (s.got.has(j)) continue;
+      const m = field.minerals[j];
+      const dy = m.y - s.y;
+      if (dy <= 0) continue;
+      if (Math.abs(m.x - s.x) > REACH_PER_PX * dy + field.params.pickupR) continue;
+      const d = Math.hypot(m.x - s.x, dy);
+      if (d < bestD) { bestD = d; best = j; }
+    }
+    let steer = 0;
+    if (best >= 0) {
+      const dx = field.minerals[best].x - s.x;
+      steer = Math.abs(dx) < 4 ? 0 : Math.sign(dx);
+    }
+    stepRun(field, s, steer, dt);
+  }
+  return s;
+}
+
+/* ============================================================================
+   DRAW
+   ========================================================================== */
+function drawField(ctx, field, view) {
+  const { scale, showGuides } = view;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#171219';
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.translate(view.ox, view.oy);
+  ctx.scale(scale, scale);
+
+  // field body
+  ctx.fillStyle = '#241c22';
+  ctx.fillRect(-GEO.HALF_W, 0, GEO.HALF_W * 2, field.height);
+
+  if (showGuides) {
+    ctx.strokeStyle = 'rgba(255,255,255,.28)';
+    ctx.lineWidth = 2 / scale;
+    ctx.beginPath(); ctx.moveTo(-GEO.HALF_W, 0); ctx.lineTo(GEO.HALF_W, 0); ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(110,240,255,.35)';
+    ctx.beginPath(); ctx.moveTo(-GEO.HALF_W, GEO.TOP_Y); ctx.lineTo(GEO.HALF_W, GEO.TOP_Y); ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,200,46,.8)';
+    ctx.lineWidth = 3 / scale;
+    ctx.beginPath(); ctx.moveTo(-GEO.HALF_W, field.height); ctx.lineTo(GEO.HALF_W, field.height); ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,.30)';
+    ctx.font = `${11 / scale}px monospace`;
+    ctx.textBaseline = 'middle';
+    for (let m = 10; m <= field.params.depthM; m += 10) {
+      const y = m * GEO.M;
+      ctx.fillRect(-GEO.HALF_W, y, GEO.HALF_W * 2, 1 / scale);
+      ctx.fillText(m + 'm', -GEO.HALF_W + 4, y - 7 / scale);
+    }
+  }
+
+  // rocks
+  for (let i = 0; i < field.rocks.length; i++) {
+    const r = field.rocks[i];
+    if (view.dead && view.dead.has(i)) continue;
+    ctx.fillStyle = r.tag === 'gate' ? '#6b6472' : r.tag === 'ring' ? '#5b5466' : '#4a4653';
+    ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.5)';
+    ctx.lineWidth = 2 / scale;
+    ctx.stroke();
+  }
+
+  // minerals
+  const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 260);
+  for (let i = 0; i < field.minerals.length; i++) {
+    const m = field.minerals[i];
+    if (view.got && view.got.has(i)) continue;
+    const def = MINERALS[m.type];
+    if (m.tag === 'pocket') {
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = def.edge;
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r + 6, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = def.color;
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = def.edge;
+    ctx.lineWidth = 2 / scale;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/* ============================================================================
+   PANEL A — gallery
+   ========================================================================== */
+const galleryEl = document.getElementById('gallery');
+let FIELDS = [];
+
+function rebuildGallery() {
+  FIELDS = [];
+  galleryEl.innerHTML = '';
+  for (let i = 0; i < 12; i++) {
+    const seed = BASE_SEED + i;
+    const f = genField(seed, P, MODE);
+    FIELDS.push(f);
+
+    const div = document.createElement('div');
+    div.className = 'thumb' + (i === SELECTED ? ' sel' : '');
+    const cv = document.createElement('canvas');
+    // Height follows the field's own aspect: a 38m field is short and wide, and a
+    // fixed-height thumbnail would leave two thirds of the tile as dead space.
+    cv.width = 170;
+    cv.height = Math.round(clamp((cv.width * (f.height + 12)) / (GEO.HALF_W * 2 + 12), 60, 320));
+    div.appendChild(cv);
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    const bot = greedyRun(f);
+    cap.innerHTML = `<span>#${seed}</span><span>bot ${Math.round((100 * bot.base) / Math.max(1, f.stats.totalCoins))}%</span>`;
+    div.appendChild(cap);
+    div.onclick = () => { SELECTED = i; rebuildGallery(); drawDetail(); };
+    galleryEl.appendChild(div);
+
+    const scale = Math.min(cv.width / (GEO.HALF_W * 2 + 12), cv.height / (f.height + 12));
+    drawField(cv.getContext('2d'), f, {
+      scale, ox: cv.width / 2, oy: 6, showGuides: false,
+    });
+  }
+}
+
+/* ============================================================================
+   PANEL B — detail
+   ========================================================================== */
+const detailCv = document.getElementById('detailCv');
+const statsEl = document.getElementById('stats');
+let coneAt = null;
+let showCone = true, showBot = true;
+
+function detailView(f) {
+  const maxH = Math.min(760, window.innerHeight - 160);
+  const scale = Math.min(1, maxH / (f.height + 20));
+  detailCv.width = Math.round((GEO.HALF_W * 2 + 20) * scale);
+  detailCv.height = Math.round((f.height + 20) * scale);
+  return { scale, ox: detailCv.width / 2, oy: 10 * scale, showGuides: true };
+}
+
+function drawDetail() {
+  const f = FIELDS[SELECTED];
+  if (!f) return;
+  const view = detailView(f);
+  const ctx = detailCv.getContext('2d');
+  drawField(ctx, f, view);
+
+  ctx.save();
+  ctx.translate(view.ox, view.oy);
+  ctx.scale(view.scale, view.scale);
+
+  // reach cone from the clicked point
+  if (showCone && coneAt) {
+    const dy = f.height - coneAt.y;
+    ctx.fillStyle = 'rgba(110,240,255,.10)';
+    ctx.strokeStyle = 'rgba(110,240,255,.55)';
+    ctx.lineWidth = 2 / view.scale;
+    ctx.beginPath();
+    ctx.moveTo(coneAt.x, coneAt.y);
+    ctx.lineTo(coneAt.x - REACH_PER_PX * dy, f.height);
+    ctx.lineTo(coneAt.x + REACH_PER_PX * dy, f.height);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#6ef0ff';
+    ctx.beginPath(); ctx.arc(coneAt.x, coneAt.y, 5 / view.scale, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // greedy bot path
+  const bot = greedyRun(f);
+  if (showBot) {
+    ctx.strokeStyle = 'rgba(255,200,46,.9)';
+    ctx.lineWidth = 3 / view.scale;
+    ctx.lineJoin = ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(bot.path[0].x, bot.path[0].y);
+    for (const q of bot.path) ctx.lineTo(q.x, q.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  renderStats(f, bot);
+}
+
+function renderStats(f, bot) {
+  const s = f.stats;
+  const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '0%');
+  statsEl.innerHTML = `<table>
+    <tr><td>seed</td><td>${f.seed}</td></tr>
+    <tr><td>mode</td><td>${MODE === 'flat' ? 'rata' : 'urat + kantong'}</td></tr>
+    <tr><td class="sub">&nbsp;</td><td></td></tr>
+    <tr><td>mineral tier 0</td><td>${s.tiers[0]}</td></tr>
+    <tr><td>mineral tier 1</td><td>${s.tiers[1]}</td></tr>
+    <tr><td>mineral tier 2</td><td>${s.tiers[2]}</td></tr>
+    <tr><td>urat</td><td>${f.veins.length}</td></tr>
+    <tr><td>kantong</td><td>${f.pockets.length}</td></tr>
+    <tr><td>batu (gerbang / cincin / total)</td><td>${s.gates} / ${s.rings} / ${f.rocks.length}</td></tr>
+    <tr><td>sel kosong</td><td>${s.emptyPct}%</td></tr>
+    <tr><td class="sub">&nbsp;</td><td></td></tr>
+    <tr><td>nilai tersedia</td><td>${s.totalCoins}</td></tr>
+    <tr><td>nilai diambil bot</td><td>${bot.base} (${pct(bot.base, s.totalCoins)})</td></tr>
+    <tr><td>koin bot (pakai chain)</td><td>${bot.coins}</td></tr>
+    <tr><td>bot ambil</td><td>${bot.got.size}/${f.minerals.length} (${pct(bot.got.size, f.minerals.length)})</td></tr>
+    <tr><td>chain terpanjang bot</td><td>x${bot.bestChain}</td></tr>
+  </table>
+  <div class="hint">Angka yang penting: <b>nilai diambil bot</b>. Makin mendekati 100%,
+  makin nggak ada yang perlu dipilih — jalur serakah dan jalur terbaik jadi jalur yang sama.</div>`;
+}
+
+detailCv.addEventListener('pointerdown', (e) => {
+  const f = FIELDS[SELECTED];
+  if (!f) return;
+  const view = detailView(f);
+  const rect = detailCv.getBoundingClientRect();
+  coneAt = {
+    x: (e.clientX - rect.left - view.ox) / view.scale,
+    y: (e.clientY - rect.top - view.oy) / view.scale,
+  };
+  drawDetail();
+});
+
+/* ============================================================================
+   PANEL C — hand driving
+   ========================================================================== */
+const drivePanel = document.getElementById('drivePanel');
+const driveCv = document.getElementById('driveCv');
+const driveOut = document.getElementById('driveOut');
+let drive = null;
+const input = { left: false, right: false, down: false, x0: 0, steer: 0 };
+
+function startDrive() {
+  const f = FIELDS[SELECTED];
+  if (!f) return;
+  drive = { f, s: newRun(f), last: performance.now(), bot: greedyRun(f) };
+  drivePanel.classList.remove('hidden');
+  driveOut.textContent = '';
+  drivePanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function driveTick(now) {
+  if (!drive) return;
+  const dt = Math.min(0.05, (now - drive.last) / 1000);
+  drive.last = now;
+
+  let steer = 0;
+  if (input.left) steer -= 1;
+  if (input.right) steer += 1;
+  if (!steer && input.down) steer = input.steer;
+  stepRun(drive.f, drive.s, clamp(steer, -1, 1), dt);
+
+  const f = drive.f, s = drive.s;
+  const ctx = driveCv.getContext('2d');
+  // camera follows the pod, field drawn 1:1
+  drawField(ctx, f, {
+    scale: 1,
+    ox: driveCv.width / 2,
+    oy: driveCv.height * 0.35 - s.y,
+    showGuides: true,
+    got: s.got, dead: s.dead,
+  });
+
+  ctx.save();
+  ctx.translate(driveCv.width / 2, driveCv.height * 0.35 - s.y);
+  ctx.fillStyle = s.grind > 0 ? '#ff9d9d' : '#e8f2ff';
+  ctx.beginPath(); ctx.arc(s.x, s.y, GEO.POD_R, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(110,240,255,.5)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(s.x, s.y, f.params.pickupR, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = '#dde3ee';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText(`dalam ${(s.y / GEO.M).toFixed(0)}m   koin ${s.coins}   chain x${s.chain}`, 10, 20);
+
+  if (s.done) {
+    driveOut.innerHTML =
+      `selesai — koin lo <b>${s.coins}</b> · bot serakah <b>${drive.bot.coins}</b>` +
+      ` · nilai diambil ${s.base}/${f.stats.totalCoins} (bot ${drive.bot.base})` +
+      ` · mineral ${s.got.size}/${f.minerals.length} · chain terpanjang x${s.bestChain}`;
+    drive = null;
+    return;
+  }
+  requestAnimationFrame(driveTick);
+}
+
+addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') { input.left = true; e.preventDefault(); }
+  if (e.key === 'ArrowRight') { input.right = true; e.preventDefault(); }
+});
+addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowLeft') input.left = false;
+  if (e.key === 'ArrowRight') input.right = false;
+});
+driveCv.addEventListener('pointerdown', (e) => {
+  input.down = true; input.x0 = e.clientX; input.steer = 0;
+  driveCv.setPointerCapture(e.pointerId);
+});
+driveCv.addEventListener('pointermove', (e) => {
+  if (!input.down) return;
+  // relative drag, origin chases the finger so reversing is always a short move
+  input.x0 = clamp(input.x0, e.clientX - GEO.DRAG_RANGE, e.clientX + GEO.DRAG_RANGE);
+  input.steer = clamp((e.clientX - input.x0) / GEO.DRAG_RANGE, -1, 1);
+});
+const releaseDrag = () => { input.down = false; input.steer = 0; };
+addEventListener('pointerup', releaseDrag);
+addEventListener('pointercancel', releaseDrag);
+
+/* ============================================================================
+   UI wiring
+   ========================================================================== */
+function buildControls() {
+  const a = document.getElementById('ctlA'), b = document.getElementById('ctlB');
+  a.innerHTML = ''; b.innerHTML = '';
+
+  const biome = document.createElement('div');
+  biome.className = 'ctl';
+  biome.innerHTML = `<label>biome</label>
+    <select id="biomeSel"><option value="grass">Grassland</option>
+    <option value="desert">Desert</option><option value="volcano">Volcanic</option></select><output></output>`;
+  a.appendChild(biome);
+  const sel = biome.querySelector('#biomeSel');
+  sel.value = P.biome;
+  sel.onchange = () => { P.biome = sel.value; refresh(); };
+
+  for (const [key, label, min, max, step, panel] of SLIDERS) {
+    const d = document.createElement('div');
+    d.className = 'ctl';
+    d.innerHTML = `<label>${label}</label>
+      <input type="range" min="${min}" max="${max}" step="${step}" value="${P[key]}">
+      <output>${P[key]}</output>`;
+    const inp = d.querySelector('input'), out = d.querySelector('output');
+    inp.oninput = () => {
+      P[key] = parseFloat(inp.value);
+      out.textContent = P[key];
+      refresh();
+    };
+    (panel === 'A' ? a : b).appendChild(d);
+  }
+}
+
+function refresh() {
+  document.getElementById('json').value = JSON.stringify(P, null, 1);
+  rebuildGallery();
+  drawDetail();
+}
+
+document.getElementById('btnReset').onclick = () => { P = { ...DEFAULTS }; buildControls(); refresh(); };
+document.getElementById('btnApplyJson').onclick = () => {
+  try {
+    const v = JSON.parse(document.getElementById('json').value);
+    P = { ...DEFAULTS, ...v };
+    buildControls();
+    refresh();
+  } catch (err) { alert('JSON nggak kebaca: ' + err.message); }
+};
+document.getElementById('mFlat').onclick = () => {
+  MODE = 'flat';
+  document.getElementById('mFlat').classList.add('on');
+  document.getElementById('mVein').classList.remove('on');
+  refresh();
+};
+document.getElementById('mVein').onclick = () => {
+  MODE = 'vein';
+  document.getElementById('mVein').classList.add('on');
+  document.getElementById('mFlat').classList.remove('on');
+  refresh();
+};
+document.getElementById('seedIn').oninput = (e) => {
+  BASE_SEED = parseInt(e.target.value, 10) || 0;
+  refresh();
+};
+document.getElementById('btnSeed').onclick = () => {
+  BASE_SEED = (Math.random() * 1e6) | 0;
+  document.getElementById('seedIn').value = BASE_SEED;
+  refresh();
+};
+document.getElementById('btnCone').onclick = (e) => { showCone = !showCone; e.target.classList.toggle('on', showCone); drawDetail(); };
+document.getElementById('btnBot').onclick = (e) => { showBot = !showBot; e.target.classList.toggle('on', showBot); drawDetail(); };
+document.getElementById('btnPlay').onclick = () => { startDrive(); requestAnimationFrame(driveTick); };
+document.getElementById('btnRetry').onclick = () => { startDrive(); requestAnimationFrame(driveTick); };
+document.getElementById('btnNextSeed').onclick = () => {
+  SELECTED = (SELECTED + 1) % 12;
+  rebuildGallery(); drawDetail(); startDrive(); requestAnimationFrame(driveTick);
+};
+document.getElementById('btnStop').onclick = () => { drive = null; drivePanel.classList.add('hidden'); };
+
+/* pockets shimmer, so they read as "worth a detour" from a distance */
+setInterval(() => { if (!drive) drawDetail(); }, 120);
+
+buildControls();
+refresh();
+
+/* Exposed so the numbers in the header comment can be re-measured from the
+   console instead of eyeballed: `sweep(24)`. */
+window.sweep = function sweep(n = 24, mode = MODE, params = P) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const f = genField(BASE_SEED + i, params, mode);
+    const bot = greedyRun(f);
+    out.push({
+      seed: f.seed,
+      minerals: f.minerals.length,
+      total: f.stats.totalCoins,
+      botBase: bot.base,
+      botCoins: bot.coins,
+      botGot: bot.got.size,
+      sweptPct: Math.round((100 * bot.got.size) / Math.max(1, f.minerals.length)),
+      valuePct: Math.round((100 * bot.base) / Math.max(1, f.stats.totalCoins)),
+      chain: bot.bestChain,
+    });
+  }
+  const avg = (k) => Math.round(out.reduce((s, r) => s + r[k], 0) / out.length);
+  return { rows: out, avgSwept: avg('sweptPct'), avgValuePct: avg('valuePct'), avgChain: avg('chain') };
+};
+window.__mock = { genField, greedyRun, newRun, stepRun, GEO, MINERALS, POOLS, get P() { return P; } };
+</script>
+</body>
+</html>
