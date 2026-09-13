@@ -14,6 +14,10 @@ const Save = {
     coins: 0, power: 1, bounce: 1, drill: 1, storage: 1,
     best: 0, deepest: 0, runs: 0, muted: false, found: [],
     shake: 1, haptics: true,
+    /* launch pads: which ones have been reached, and which one is selected.
+       `reach` is the furthest absolute point in the world ever touched — separate from
+       `best`, which is the best single launch distance. Only `reach` gates anything. */
+    pads: ['greenline'], pad: 'greenline', reach: 0,
   },
 
   load() {
@@ -23,12 +27,15 @@ const Save = {
     /* clone: DEF.found is a shared array, so assigning it by reference let discoveries
        leak into the defaults and survive a reset */
     this.data.found = Array.isArray(this.data.found) ? this.data.found.slice() : [];
+    /* same shared-array trap as `found`: clone it or unlocks leak into the defaults */
+    this.data.pads = Array.isArray(this.data.pads) ? this.data.pads.slice() : ['greenline'];
+    if (!this.data.pads.includes('greenline')) this.data.pads.unshift('greenline');
     return this.data;
   },
   save() {
     try { localStorage.setItem(KEY, JSON.stringify(this.data)); } catch (e) { /* private mode */ }
   },
-  reset() { this.data = Object.assign({}, this.DEF, { found: [] }); this.save(); },
+  reset() { this.data = Object.assign({}, this.DEF, { found: [], pads: ['greenline'] }); this.save(); },
 };
 
 /* ============ upgrades ============ */
@@ -125,8 +132,45 @@ const UI = {
   showUpgradeBar(on) {
     this.el.upgrades.classList.toggle('hidden', !on);
     const h = on ? this.el.upgrades.offsetHeight : 0;
+    /* `--bar-h` is the UPGRADE bar alone, because the pad bar stacks itself on top of it
+       in CSS and reading a total here would be circular. */
     document.documentElement.style.setProperty('--bar-h', h + 'px');
-    Game.bottomUI = h;
+    this.publishBottomUi();
+  },
+
+  /* Total height the canvas has to keep clear. The meter reads this; without the pad bar
+     in the sum the meter's hint text draws underneath it. */
+  publishBottomUi() {
+    const up = this.el.upgrades.classList.contains('hidden') ? 0 : this.el.upgrades.offsetHeight;
+    const bar = document.getElementById('padBar');
+    const pad = !bar || bar.classList.contains('hidden') ? 0 : bar.offsetHeight + 8;
+    /* published separately so anything that has to clear BOTH rows can stack on it; the
+       pad bar itself must keep using --bar-h alone or the calc goes circular */
+    document.documentElement.style.setProperty('--pad-h', pad + 'px');
+    Game.bottomUI = up + pad;
+  },
+
+  /* Pad picker. Only unlocked pads get a button, and the bar hides itself entirely while
+     there is only one — a chooser with one choice is just clutter on the launch screen. */
+  buildPadBar(current) {
+    const bar = document.getElementById('padBar');
+    if (!bar) return;
+    const list = Save.data.pads || ['greenline'];
+    const open = World.pads.filter((p) => World.padUnlocked(p.key, list));
+    bar.classList.toggle('hidden', open.length < 2);
+    if (open.length < 2) { bar.innerHTML = ''; this.publishBottomUi(); return; }
+
+    bar.innerHTML = '';
+    for (const pad of open) {
+      const atm = World.stageAt(World.xOf(pad.m) / CFG.M);
+      const b = document.createElement('button');
+      b.className = 'pad-btn' + (pad.key === current ? ' on' : '');
+      b.style.setProperty('--pc', atm.accent);
+      b.innerHTML = `<b>${atm.name}</b><i>${pad.m ? Math.round(pad.m) + 'm' : 'HOME'}</i>`;
+      b.onclick = () => Game.selectPad(pad.key);
+      bar.appendChild(b);
+    }
+    this.publishBottomUi();
   },
 
   setCoins(v) { this.el.coinText.textContent = Math.round(v); },

@@ -78,6 +78,10 @@ const CFG = {
   PEN_MAX_SPEED: 1250,               // clamp so a huge impact still reads as digging
   PEN_TURN: 2.4,                     // how fast the path bends from impact angle to straight
                                      // down; soil resists sideways travel far more
+  /* How long the underground field takes to fade up after impact, in seconds of GAME time.
+     Game time on purpose: the hitstop freezes it too, so the contact freeze-frame holds the
+     surface exactly as it was and the field only arrives once the world starts moving again. */
+  UG_REVEAL_T: 0.30,
   IMPACT_STOP_T: 0.32,               // beat between "energy gone" and the drill motor
   IMPACT_MIN_SPEED: 150,             // below this a contact is a landing, not an impact
 
@@ -228,6 +232,37 @@ const ATMOSPHERES = [
     vecFar: 'desertFar', vecMid: 'desertMid', vecProps: 'desertProps', prop: 'rock', propColor: '#0a1620',
     accent: '#71ffe1', celestial: '#a7fff0', stars: 1, weather: 'anomaly' },
 ];
+
+/* ============ launch pads ============
+   One pad per atmosphere. Reaching a stage for the first time unlocks its pad, and a run
+   can then start from there instead of from home — the checkpoint idea, not Space
+   Frontier's separate systems, because this world is one continuous line and the far
+   stages physically sit behind the near ones.
+
+   Why it exists: from the home pad alone, ASHFALL needs POWER 31 (~10.5M coins) and
+   ANOMALY needs POWER 40 (~246M). At 14*sqrt(m) a run near 1000m pays about 440 coins, so
+   those two atmospheres were roughly half a million runs away — art that shipped and that
+   nobody would ever see. Measured pad to pad the same ladder is POWER 5, 5, 10, 10, 16, 18.
+
+   `m` is metres TRAVELLED, the same coordinate SITES use, so the two tables can be read
+   against each other. Positions are authored, not derived: every pad has to clear each
+   landing zone's near-miss band (a pad inside one would flatten the bowl the site needs)
+   and sit past its own stage's colour crossfade. They also deliberately miss every sample
+   point Tools/refgen.mjs reads, so flattening the ground under them leaves the Unity
+   port's fidelity references untouched. */
+const PADS = [
+  { key: 'greenline',   m: 0 },      // home. Its runway is shaped in World.init's main loop.
+  { key: 'skyridge',    m: 215 },
+  { key: 'sunscorched', m: 430 },
+  { key: 'twilight',    m: 800 },
+  { key: 'volcanic',    m: 1180 },
+  { key: 'ashfall',     m: 1850 },
+  { key: 'anomaly',     m: 2650 },
+];
+/* Flat core and blend-out either side of a pad, in metres. The flat part has to be wider
+   than the pod so the launch angle is the same every time; the ramp exists so the pad does
+   not leave a step in the silhouette. */
+const PAD_FLAT = 14, PAD_RAMP = 42;
 
 /* How the ground behaves when a meteor hits it, per biome. Resistance is the only
    mechanical difference; the rest is debris colour so each biome reads distinct. */
@@ -431,6 +466,24 @@ const World = {
         else if (i > iB) w = U.smooth(((iB + pad) - i) / pad);
         const inner = i >= iA && i <= iB ? Math.sin(((i - iA) / (iB - iA)) * Math.PI) * (dip * 0.35) : 0;
         this.hs[i] = U.lerp(this.hs[i], base + inner, w);
+      }
+    }
+
+    /* Level the ground under every away pad, before the zone bowls so a site always wins
+       where the two would meet. Sampled height first, then written, so the blend reads the
+       original terrain rather than its own half-finished result. */
+    for (const pad of PADS) {
+      if (pad.m === 0) continue;                    // home pad: shaped in the loop above
+      const px = this.xOf(pad.m);
+      const flatY = this.hs[U.clamp(Math.round(px / this.step), 0, count - 1)];
+      const i0 = Math.floor((px - PAD_RAMP * CFG.M) / this.step);
+      const i1 = Math.ceil((px + PAD_RAMP * CFG.M) / this.step);
+      for (let i = i0; i <= i1; i++) {
+        if (i < 0 || i >= count) continue;
+        const d = Math.abs(i * this.step - px) / CFG.M;
+        const w = d <= PAD_FLAT ? 1
+                : U.smooth(U.clamp((PAD_RAMP - d) / (PAD_RAMP - PAD_FLAT), 0, 1));
+        this.hs[i] = U.lerp(this.hs[i], flatY, w);
       }
     }
 
@@ -782,6 +835,17 @@ const World = {
   xOf: (m) => CFG.PAD_X + m * CFG.M,
   mOf: (x) => (x - CFG.PAD_X) / CFG.M,
 
+  /* ---------- launch pads ---------- */
+  pads: PADS,
+  padFor(key) { return PADS.find((p) => p.key === key) || PADS[0]; },
+  /* World x of a pad. CFG.PAD_X stays the ORIGIN of the metres-travelled coordinate — it
+     is what sites, markers and the tools are authored against — so it must not be
+     repurposed as "where this run starts". That is Game.padX. */
+  padX(key) { return this.xOf(this.padFor(key).m); },
+  /* The furthest pad the player has unlocked, so a fresh save cannot select one it has
+     never reached and a corrupt list cannot strand the run off the map. */
+  padUnlocked(key, list) { return key === 'greenline' || (list || []).includes(key); },
+
   /* ---------- site queries ---------- */
   landable: () => SITES.filter((s) => s.half > 0),
 
@@ -911,10 +975,12 @@ const World = {
     ctx.fillRect(0, 0, W, H);
 
     /* How much of space is in frame, from the altitude at the TOP of the screen. Drives
-       the stars and the sun's fade, so both answer to height rather than to the clock. */
+       the stars, so they answer to height rather than to the clock. It used to be stored on
+       World as `spaceT` for the earth-curvature pass to read; that pass is gone, so this is
+       a local again. */
     const altTop = CFG.SURFACE_Y - worldAt(0);
     const space = U.clamp((altTop - 900) / 2300, 0, 1);
-    this.spaceT = space;
+
 
     /* Stars phase in with height and with the journey's own nightfall, whichever is
        further along. Placed in world space at a very slow rate so they read as sky rather
@@ -973,39 +1039,66 @@ const World = {
     return this._pctx;
   },
 
-  /* Screen y of the distant plain's top edge. Shared by drawStack and drawParallax, and
-     soft-capped near the bottom — taken literally it slides clean off the screen at apex
-     (measured at 1.15x the screen height on a Lv20 arc) and the planet vanishes. */
+  /* Screen y of the distant plain's top edge. Shared by drawStack and drawParallax.
+     Taken literally, with NO cap: at apex it slides clean off the bottom of the screen and
+     the planet is gone, which is the point — a climb that leaves nothing behind reads as
+     scenery being dragged along rather than as altitude.
+
+     This used to be soft-capped at 0.88 of the screen with a 0.12 creep, precisely so the
+     planet could NOT vanish. That was the wrong call: past roughly 100m up the cap froze
+     the horizon, so another 100m of climb changed nothing on screen. The cap also has to
+     match whatever the real terrain does, and the terrain is drawn in world space with no
+     cap at all — pinning one and not the other pulls them apart visibly. */
   horizonAt(cam, H) {
     const z = cam.bz || cam.zoom;
-    const raw = H * cam.anchor + (CFG.SURFACE_Y - CFG.PLAIN_LIFT - cam.y) * z;
-    const cap = H * 0.88;
-    return raw <= cap ? raw : cap + (raw - cap) * 0.12;
+    return H * cam.anchor + (CFG.SURFACE_Y - CFG.PLAIN_LIFT - cam.y) * z;
   },
 
   drawParallax(ctx, cam, W, H) {
     const pal = this.atmosphereAt(cam.x / CFG.M);
     const b = pal.blend;
-    if (!b || b.t <= 0.002 || b.t >= 0.998) {
-      this.drawStack(ctx, cam, W, H, b ? (b.t < 0.5 ? b.prev : b.next) : pal);
-      return;
-    }
-    /* Cross-fade, because the SHAPES cannot be interpolated. Colours blend across 250-odd
-       metres, but which mountain path is drawn, and whether this stage has hill bands or a
-       desert rock layer, used to flip in a single metre at the middle of that blend — the
-       skyline became different mountains between one frame and the next and the far ground
-       line jumped 80px, which is the "turun naik" you get crossing a stage.
+    if (!b) { this.drawStack(ctx, cam, W, H, pal); return; }
 
-       Drawn as a dissolve rather than with globalAlpha because the stack sets its own
-       alpha internally for haze and overlays; a layer is the only way to fade the result
-       as one image. The outgoing stage is painted solid first so coverage is always
-       complete — two half-transparent stacks would let the sky through between them. */
-    this.drawStack(ctx, cam, W, H, b.prev);
+    /* Two things cross a stage boundary, and they must NOT travel together.
+
+       COLOUR blends across the whole band — 250-odd metres for the desert — because a slow
+       atmospheric shift is the point. SHAPE cannot be interpolated at all: which mountain
+       path is drawn, and whether this stage has hill bands or a desert rock layer, is a
+       choice between two sets of art. So the shapes dissolve inside a SHORT window in the
+       middle of the colour blend, and outside that window exactly one skyline is drawn.
+
+       This used to hand each half its own raw atmosphere — `drawStack(..., b.prev)` — which
+       threw away the blended palette that had just been computed and drew the outgoing
+       stage in its OWN colours. Measured at 433m travelled, 82% of the way through the
+       skyridge->sunscorched blend, that still put SKYRIDGE's blue hills and blue-grey pines
+       at 18% over an orange desert. Blue against orange at 18% is not a ghost, it reads as
+       solid scenery from the wrong biome — which is exactly what it looked like.
+
+       Now both halves take the SAME blended colours and differ only in which art they
+       point at, so the palette is never mixed with itself and the only thing dissolving is
+       the silhouette.
+
+       Drawn as a layer rather than with globalAlpha because the stack sets its own alpha
+       internally for haze and overlays; a layer is the only way to fade the result as one
+       image. The outgoing shape is painted solid first so coverage is always complete —
+       two half-transparent stacks would let the sky through between them. */
+    const st = U.smooth(U.clamp((b.t - 0.40) / 0.20, 0, 1));
+    const propColor = U.mix(b.prev.propColor, b.next.propColor, b.t);
+    const shaped = (side) => Object.assign({}, pal, {
+      vecFar: side.vecFar, vecMid: side.vecMid,
+      vecHill0: side.vecHill0, vecHill1: side.vecHill1,
+      vecProps: side.vecProps, prop: side.prop, propColor,
+    });
+
+    if (st <= 0.002) { this.drawStack(ctx, cam, W, H, shaped(b.prev)); return; }
+    if (st >= 0.998) { this.drawStack(ctx, cam, W, H, shaped(b.next)); return; }
+
+    this.drawStack(ctx, cam, W, H, shaped(b.prev));
     const lx = this.paraLayer(ctx);
-    this.drawStack(lx, cam, W, H, b.next);
+    this.drawStack(lx, cam, W, H, shaped(b.next));
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = U.smooth(b.t);
+    ctx.globalAlpha = st;
     ctx.drawImage(this._para, 0, 0);
     ctx.restore();
   },
@@ -1032,23 +1125,16 @@ const World = {
        are quoted so the order can be checked against the file. */
     const k = (H / 900) * z;
 
-    /* Earth curvature, which only exists once you are high enough to see it. A parabola is
-       within a pixel of a circular arc across one screen at these angles, and it costs one
-       multiply per column instead of a trig call. */
-    const curve = (this.spaceT || 0) * H * 0.25;
-    const droop = (sx) => {
-      const t = (sx - W / 2) / (W / 2);
-      return curve * t * t;
-    };
-    /* a flat fill whose TOP edge follows the curve */
-    const curvedFill = (topY, fill) => {
+    /* The horizon is a STRAIGHT line, and that is a decision rather than a simplification.
+       There used to be an earth-curvature pass here: a parabola bending the top edge of the
+       distant plain, the far ground line and every ridge row into a dome. It was removed
+       because a curved horizon is all-or-nothing — the real terrain, the props standing on
+       it, the sites and the 100m markers are drawn in world space and would every one of
+       them have to bend by the same amount to agree with it. Bending only the backdrop is
+       what made it read as a dome sitting behind a flat world instead of as a planet. */
+    const fillBelow = (topY, fill) => {
       ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.moveTo(0, H);
-      for (let sx = 0; sx <= W + 16; sx += 16) ctx.lineTo(sx, topY + droop(sx));
-      ctx.lineTo(W, H);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(0, topY, W, H - topY + 2);
     };
 
     /* A tiled band of one vector. The frames are 1600px and this world is 4200 metres, so
@@ -1088,7 +1174,7 @@ const World = {
       for (let i = i0; i <= i1; i++) {
         const sx = W / 2 + (i * P + ph - cam.x) * rate * z;
         if (sx > W + 2 || sx + sw < -2) continue;
-        const top = topY + droop(sx + sw / 2);
+        const top = topY;
         if (i & 1) {
           ctx.save();
           ctx.translate(sx + sw, 0);
@@ -1099,7 +1185,7 @@ const World = {
           drawVec(ctx, v, sx, top, sw, drawH, fill);
         }
       }
-      if (ground) curvedFill(base - 1, ground);
+      if (ground) fillBelow(base - 1, ground);
     };
 
     /* Where a band's silhouette sits at a world x, in screen y. Same tiling maths as
@@ -1183,7 +1269,7 @@ const World = {
     pg.addColorStop(0, pal.plain0);
     pg.addColorStop(0.338, pal.plain1);
     pg.addColorStop(0.722, pal.plain2);
-    curvedFill(horizon, pg);
+    fillBelow(horizon, pg);
 
     /* "06 · Ground Surface + Props" — everything except the ground itself, which is this
        game's terrain and gets drawn for real later.
@@ -1201,7 +1287,7 @@ const World = {
       ctx.moveTo(0, H);
       for (let sx = 0; sx <= W + 12; sx += 12) {
         const wx = cam.x + (sx - W / 2) / (0.5 * z);
-        ctx.lineTo(sx, farGround + droop(sx)
+        ctx.lineTo(sx, farGround
           + Math.sin(wx * 0.0021) * 4 * k + Math.sin(wx * 0.0067 + 2) * 2.5 * k);
       }
       ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
@@ -1543,13 +1629,22 @@ const World = {
   },
 
   /* ---------- underground draw ---------- */
-  drawUnderground(ctx, cam, left, right, top, bottom) {
+  /* `reveal` (0..1) fades the whole field up after impact. Without it the entire dig site —
+     155 minerals, the rocks, the bedrock line — materialises in the single frame the pod
+     touches the ground, which is half of what "tiba-tiba muncul" was describing. The other
+     half was the camera; see Game.onImpact. */
+  drawUnderground(ctx, cam, left, right, top, bottom, reveal) {
     const ug = this.ug;
     if (!ug) return;
     const sy = ug.surfaceY;
     const t = performance.now() / 1000;
+    const rv = reveal === undefined ? 1 : U.clamp(reveal, 0, 1);
+    if (rv <= 0) return;
 
     ctx.save();
+    /* Everything below inherits this, EXCEPT the two passes that set their own alpha —
+       those multiply by `rv` themselves. */
+    ctx.globalAlpha = rv;
     this.clipToSoil(ctx, left, right);
 
     /* depth layer bands */
@@ -1578,7 +1673,7 @@ const World = {
       ctx.fillStyle = g;
       ctx.fillRect(left - 20, ug.botY, right - left + 40, bottom - ug.botY + 40);
       ctx.save();
-      ctx.globalAlpha = 0.38;
+      ctx.globalAlpha = 0.38 * rv;
       for (const m of ug.locked) {
         if (m.y < top - 40 || m.y > bottom + 40) continue;
         drawMineral(ctx, m, t);
@@ -1592,7 +1687,7 @@ const World = {
 
     /* subtle strata speckle */
     ctx.save();
-    ctx.globalAlpha = 0.13;
+    ctx.globalAlpha = 0.13 * rv;
     ctx.fillStyle = '#000';
     const gridY0 = Math.floor(Math.max(top, sy) / 52) * 52;
     for (let y = gridY0; y < bottom; y += 52) {

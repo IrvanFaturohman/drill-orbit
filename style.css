@@ -177,7 +177,8 @@ body { display: flex; align-items: center; justify-content: center; }
   font-weight: bold; letter-spacing: 3px; font-size: 15px;
   text-shadow: 0 2px 6px rgba(0,0,0,.6);
 }
-#tapHint { bottom: calc(var(--bar-h, 0px) + 128px); animation: breathe 1.3s ease-in-out infinite; }
+/* clears the upgrade bar AND the pad bar; the canvas meter rises by the same amount */
+#tapHint { bottom: calc(var(--bar-h, 0px) + var(--pad-h, 0px) + 128px); animation: breathe 1.3s ease-in-out infinite; }
 @keyframes breathe { 0%,100% { opacity: .45; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-4px) } }
 
 #steerHint {
@@ -411,3 +412,47 @@ body { display: flex; align-items: center; justify-content: center; }
 .dbg-btns button.wide b { display: block; font-size: 11px; letter-spacing: 1px; }
 .dbg-btns button.wide i { display: block; font-style: normal; font-size: 9px; opacity: .6; }
 .dbg-note { margin-top: 6px; font-size: 9px; opacity: .4; text-align: center; }
+
+
+/* ============ pad picker ============
+   Sits just above the upgrade bar on the launch screen. Hidden until a second pad is
+   unlocked, so the first hour of the game never sees it. Scrolls sideways rather than
+   wrapping: seven pads on a phone would otherwise eat two rows of the play area. */
+#padBar {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(var(--bar-h, 0px) + 8px);
+  display: flex;
+  gap: 6px;
+  /* keep the last button clear of the debug gear in the corner */
+  padding: 0 44px 0 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  z-index: 6;
+  -webkit-overflow-scrolling: touch;
+}
+#padBar::-webkit-scrollbar { display: none; }
+
+.pad-btn {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 9px;
+  background: rgba(10, 16, 28, .62);
+  color: #dbe6f5;
+  font-family: inherit;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+}
+.pad-btn b { font-size: 10px; letter-spacing: .06em; font-weight: 700; }
+.pad-btn i { font-size: 9px; font-style: normal; opacity: .6; }
+.pad-btn.on {
+  border-color: var(--pc, #9ff2ff);
+  background: rgba(10, 16, 28, .85);
+  box-shadow: 0 0 0 1px var(--pc, #9ff2ff) inset, 0 0 14px -4px var(--pc, #9ff2ff);
+}
+.pad-btn.on b { color: var(--pc, #9ff2ff); }

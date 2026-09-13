@@ -2423,3 +2423,357 @@ bertepi keras tanpa kabut, di skala yang beda dari semua yang lain. Sistemnya di
 |---|---|
 | gambar frame penuh di permukaan | 0,090 ms (dari 0,228) |
 | baris terhapus | 112 |
+
+---
+
+## Pad bisa pindah (13 Sep 2026) — dari ide *"stagenya unlock gitu, gak langsung pindah"*
+
+Ide asalnya dari Space Frontier 2: stage yang dibuka satu-satu, bukan dunia yang dilewatin
+sekali terus ditinggal. Tapi struktur SF2 nggak bisa ditiru mentah — di sana tiap *system*
+itu arena terpisah, sementara dunia ini satu garis lurus 4200m di mana ASHFALL secara fisik
+ada **di belakang** semua yang lain. Yang diambil idenya, bukan strukturnya: **checkpoint**.
+
+### Kenapa ini perlu
+
+Dihitung dari pad rumah, POWER yang dibutuhin buat nyampe tiap atmosphere:
+
+| stage | jarak | POWER | total koin |
+|---|---:|---:|---:|
+| skyridge | 96m | 1 | 0 |
+| sunscorched | 376m | 10 | 8rb |
+| twilight | 736m | 17 | 81rb |
+| volcanic | 1096m | 23 | 638rb |
+| ashfall | 1796m | 31 | **10,5 juta** |
+| anomaly | 2596m | 40 | **246 juta** |
+
+Satu run di sekitar 1000m bayar ~440 koin. Artinya ANOMALY itu kira-kira setengah juta run.
+Dua dari tujuh atmosphere — lengkap sama palet, haze, vector, bintang — praktis nggak akan
+pernah kelihatan. Itu bukan progression, itu konten mati.
+
+Diukur dari pad ke pad, tangga yang sama jadi **POWER 5, 5, 10, 10, 16, 18**.
+
+### Yang dipisah: `CFG.PAD_X` lawan `Game.padX`
+
+Ini bagian yang paling gampang dirusak. `CFG.PAD_X` itu **titik nol koordinat "meter
+tempuh"** — SITES, marker 100m, `World.xOf`/`mOf`, `tools/check-layout.mjs` dan
+`Tools/refgen.mjs` semuanya diauthor relatif ke situ. Kalau dia dipakai ulang jadi "di mana
+run ini mulai", seluruh tabel site bergeser tiap kali pemain ganti pad.
+
+Jadi dia **nggak disentuh**. Yang baru `Game.padX`, cuma soal di mana pod berdiri.
+
+### Dua jarak, dan bedanya penting
+
+```
+d   = (pod.x - Game.padX) / M     jarak dari PAD ini
+abs = World.mOf(pod.x)            posisi absolut di dunia
+```
+
+`d` yang dipakai buat bayaran, BEST, dan countdown rekor — itu yang dicapai peluncurannya,
+dan tetep sebanding dari pad mana pun. `abs` yang dipakai buat site, atmosphere, readout
+NEXT, dan unlock pad. Kalau bayaran pakai `abs`, berangkat dari pad ANOMALY terus diem aja
+langsung dibayar `14*sqrt(2650)` = 720 koin. Makanya dipisah.
+
+Di save juga dipisah: `best` itu rekor sekali lompat, `reach` itu titik terjauh yang pernah
+disentuh. Cuma `reach` yang jadi gerbang.
+
+### Posisi pad diauthor, bukan dihitung
+
+Tujuh angka, ditaruh manual di `PADS` (js/world.js), dalam meter tempuh:
+`0, 215, 430, 800, 1180, 1850, 2650`.
+
+Tiga syarat yang harus dipenuhi sekaligus, dan ketiganya udah dicek pakai skrip:
+
+1. **Bersih dari pita near-miss tiap landing zone.** Pad meratain tanah di sekitarnya; kalau
+   nimpa site, mangkuk yang site itu butuhin ikut rata. Kandidat pertama (`from + blendHalf`)
+   naruh pad SUNSCORCHED persis di dalam zona GIANT SKELETON.
+2. **Lewat dari pita cross-fade warna stage-nya sendiri**, biar nggak mulai di tengah transisi.
+3. **Meleset dari semua titik sampel `Tools/refgen.mjs`.** Ini yang paling nggak kelihatan:
+   meratain tanah ngubah `hs`, dan kalau kena titik yang dipakai test fidelity Unity, semua
+   referensinya harus digenerate ulang. Dengan posisi sekarang `hs[0,1,10,100,500,1000,2000]`
+   dan `yAt(0,110,500,1000,4200,9000)` semuanya **sama persis** — udah diverifikasi.
+
+Perataan sendiri: rata di ±14m, lalu `U.smooth` balik ke tanah asli sampai ±42m, dikerjain
+**sebelum** mangkuk zona dicarve biar site selalu menang kalau keduanya ketemu.
+
+### UI
+
+Bar pemilih pad muncul di atas bar upgrade, dan **sembunyi sendiri selama baru satu pad
+kebuka** — pemilih dengan satu pilihan cuma bikin berantakan. `--bar-h` tetep tinggi bar
+upgrade doang (bar pad numpuk di atasnya lewat CSS, jadi kalau dijumlah bakal circular);
+tinggi totalnya dipublish terpisah ke `--pad-h` dan `Game.bottomUI`, yang dipakai meter
+canvas sama hint TAP TO LAUNCH biar nggak ketimpa.
+
+### Yang belum
+
+Belum diport ke Unity. Site masih diauthor buat dunia tanpa pad — beberapa sekarang deket
+banget sama pad, dan celah antar pad belum dipass ulang. Dan POWER ganti peran: dia berhenti
+jadi gerbang seluruh dunia, jadi level tinggi butuh alasan lain (IMPACT dan DRILL).
+
+---
+
+## Tanah ditinggal pas naik (13 Sep 2026) — dari feedback *"tanah itu tidak ikut keatas, tetap dibawah"*
+
+Keluhannya tepat, dan kelihatan di angka. Diukur dari peluncuran sampai apex (217m naik),
+posisi tanah di layar cuma jalan segini:
+
+```
+alt   20px   tanah 66% layar
+alt  411px   tanah 71%
+alt  955px   tanah 87%
+alt 1360px   tanah 96%   <- mentok
+alt 1734px   tanah 87%   <- balik naik lagi
+```
+
+Jadi setelah sekitar 100m, naik 100m lagi nggak ngubah apa-apa di layar. Tanahnya bukan
+ketinggalan di bawah — dia ikut jalan bareng pod. Itu yang bikin ketinggian nggak kerasa
+sebagai "ninggalin tempat", cuma kayak latar yang diseret.
+
+Dua penyebabnya, dan dua-duanya sengaja dulu.
+
+### 1. Kamera cuma ngikutin 55% pendakian
+
+```js
+c.y = damp(c.y, p.y * (0.55 - fall*0.2) + (gy - 120) * (0.45 + fall*0.2), 4.2, dt);
+```
+
+Bobot 0.55 di pod itu artinya tanah mundur cuma setengah laju pod naik. Komentarnya bilang
+"CLIMBING: pull back so the arc and its apex are both visible" — dan itu emang ngasih lihat
+busurnya, tapi harganya tanah nempel terus.
+
+Sekarang `0.90 - fall*0.55`. Pas naik, kamera nempel ke pod. Pas turun, `fall` ngebalikin
+framingnya ke tanah — dan cepat: setengah detik jatuh udah `vy` 700, yaitu `fall` 0.5. Jadi
+framing impact yang lama (titik tabrakan kelihatan jauh sebelum kena) nggak hilang.
+
+### 2. `horizonAt` dipatok di 0.88 layar
+
+```js
+const cap = H * 0.88;
+return raw <= cap ? raw : cap + (raw - cap) * 0.12;
+```
+
+Ini gw sendiri yang nambahin, alasannya ditulis di komentar: *"taken literally it slides
+clean off the screen at apex and the planet vanishes"*. Ternyata itu keputusan yang salah —
+"planet-nya hilang" justru yang dicari. Dan ada alasan teknis juga: terrain asli digambar di
+world space **tanpa** cap sama sekali, jadi matok salah satunya doang bikin parallax dan
+tanah asli pisah jalan. Cap-nya dicabut, sekarang dua-duanya gerak bareng.
+
+### Hasil
+
+```
+         tanah   horizon
+alt  955px   87%    87%
+alt 1360px   96%    96%
+alt 1627px  103%   101%   <- lewat bawah layar
+APEX        108%   104%   <- langit doang
+turun        96%    93%
+turun        79%    75%
+turun        61%    57%
+```
+
+Di apex layarnya langit gelap sama bintang doang. Pas turun tanah balik naik ke frame tepat
+waktu. State lain nggak kesenggol: `ready` 55%, `penetrate` 53%, `drill` -285% (horizon jauh
+di atas layar, wajar, lagi di bawah tanah).
+
+---
+
+## Masuk ke bawah tanah: dorong, bukan potong (13 Sep 2026) — dari feedback *"tiba tiba ngezoom terus muncul barang barang dibawah tanahnya"*
+
+Dua hal jatuh di frame yang sama persis, dan dua-duanya keukur:
+
+```
+terbang    zoom 0.40   mineral 0
+impact+0   zoom 1.04   mineral 155
+```
+
+**Zoom 0.40 ke 1.04 dalam satu frame** (2,6x), dan di frame itu juga seluruh lapangan gali
+— 155 mineral, batunya, garis bedrock — muncul jadi sekaligus. Lompatan sebesar itu bukan
+pukulan, itu sambungan film.
+
+### Kenapa dulu begitu
+
+Snap zoom-nya sengaja, dan komentarnya jujur soal alasannya: damping dari 0.3 ke framing
+penetrasi makan setengah detik, dan selama setengah detik itu seluruh lapangan kepampang di
+layar sekaligus. Jadi zoom-nya dipaksa loncat biar nutupin.
+
+Itu nambal gejala. Yang sebenernya salah adalah **lapangannya digambar penuh begitu dibuat**.
+
+### Yang diubah
+
+`CFG.UG_REVEAL_T` (0,30 detik) — lapangan bawah tanah memudar naik, bukan nongol.
+`Game.ugReveal` jalan pakai **waktu game**, bukan waktu nyata, jadi hitstop ikut ngebekuin:
+frame beku pas kontak nahan permukaan persis kayak sebelumnya, dan lapangannya baru dateng
+setelah dunia gerak lagi.
+
+Ada dua `globalAlpha` di dalam `drawUnderground` (0.38 buat dinding, 0.13 buat kerikil) yang
+nimpa alpha luar kalau dibiarin — dua-duanya sekarang dikali `rv`.
+
+Dengan reveal-nya beres, snap zoom-nya nggak perlu lagi. Sekarang tinggal `tzoom = 1.55`
+terus kamera jalan sendiri. Sisa lompatannya 0.40 ke 0.58 di frame pertama, itu pun ketutup
+kilatan putih yang jatuh di frame yang sama.
+
+### Hasil
+
+```
+impact+ 0   zoom 0.58   reveal 0.00
+impact+10   zoom 0.63   reveal 0.02     <- hitstop nahan
+impact+26   zoom 0.95   reveal 0.15
+impact+46   ...         lapangan udah kebaca
+```
+
+Reveal penuh di 1,18 detik nyata; kendali baru pindah ke pemain di 3,20 detik. Jadi
+lapangannya udah jelas jauh sebelum dibutuhin. Tiga run penuh dari dua pad berbeda: nol error.
+
+---
+
+## Cross-fade parallax: warna jangan ikut dicampur (13 Sep 2026) — dari feedback *"bertumpuknya aneh, kadang beda beda warna, ada komponen aneh"*
+
+Screenshot-nya nunjukin gunung biru sama pinus hijau nangkring di tengah gurun SUNSCORCHED.
+Bukan komponen nyasar — itu stack SKYRIDGE yang lagi ditinggalin, kegambar di bawah stack
+gurunnya.
+
+### Bug-nya satu baris
+
+```js
+this.drawStack(ctx, cam, W, H, b.prev);     // <- atmosphere MENTAH
+this.drawStack(lx,  cam, W, H, b.next);     // <- atmosphere MENTAH
+```
+
+`pal` — palet yang warnanya udah dicampur — dihitung di baris sebelumnya terus **dibuang**.
+Tiap separuh digambar pakai warnanya sendiri. Jadi pas nyebrang, yang di-cross-fade bukan
+cuma bentuknya, tapi warnanya juga.
+
+Diukur di 433m tempuh: itu 82% jalan di blend skyridge→sunscorched, jadi SKYRIDGE masih
+kegambar 18% di bawah gurun. Biru 18% di atas oranye bukan bayangan tipis — biru lawan
+oranye itu komplementer, jadi kebacanya pemandangan utuh dari biome yang salah. Persis kayak
+yang kelihatan.
+
+Dibuktiin dengan A/B: matiin `drawParallax` → gunung biru sama pinusnya ilang, yang tersisa
+cuma jembatan, kaktus, marker, sama site GIANT SKELETON (semuanya world-space, dan bener).
+
+### Dua hal yang nyebrang, dan nggak boleh jalan bareng
+
+**WARNA** harusnya nge-blend sepanjang pita penuh — 252m buat gurun — karena pergeseran
+atmosfer yang pelan itu emang tujuannya. **BENTUK** nggak bisa diinterpolasi sama sekali:
+jalur gunung mana yang dipakai, dan stage ini punya pita bukit atau lapisan batu gurun, itu
+pilihan antara dua set art.
+
+Sekarang dua-duanya ambil palet campuran yang SAMA, dan cuma beda di art mana yang ditunjuk:
+
+```js
+const shaped = (side) => Object.assign({}, pal, {
+  vecFar: side.vecFar, vecMid: side.vecMid, vecHill0: side.vecHill0, ...
+});
+```
+
+Palet nggak pernah dicampur sama dirinya sendiri lagi, dan yang memudar cuma siluetnya.
+
+Bentuknya juga tukeran di **jendela pendek di tengah** blend warna (`t` 0.40–0.60), bukan
+sepanjang pita. Di luar jendela itu, persis satu skyline yang digambar. Hasilnya jendela
+tukar bentuk tinggal 40–50m raw di tiap batas, dari yang tadinya 100–300m.
+
+### Hasil
+
+```
+350m  bentuk 0.00   bukit skyridge, tapi warnanya udah hangat
+365m  bentuk 0.20   bukit mulai larut, mesa mulai muncul
+380m  bentuk 0.65   mayoritas mesa
+395m  bentuk 1.00   gurun murni
+433m  bentuk 1.00   gurun murni  <- yang tadinya biru
+```
+
+### Yang BELUM dibenerin
+
+Masih ada barel hijau sama jembatan biru di sekitar raw 400m. Itu bukan parallax — itu
+`World.props` sama art site yang diauthor, dan batas biome-nya potong keras di raw 400
+sementara palet-nya nge-blend di 340–460. Masalah terpisah, belum disentuh.
+
+---
+
+## Lengkung bumi muncul kepagian (13 Sep 2026) — dari feedback *"kenapa ada haze yang membulat ketika keatas"*
+
+Yang membulat itu `droop` — parabola yang bikin cakrawala melengkung, dikali `spaceT`.
+Bukan haze, tapi tepi atas pita plain sama hazenya ikut kebentuk.
+
+### Kenapa kepagian
+
+`spaceT` dihitung dari ketinggian **tepi atas layar**:
+
+```js
+const altTop = CFG.SURFACE_Y - worldAt(0);        // worldAt(0) = cam.y - (H*anchor)/bz
+const space  = clamp((altTop - 900) / 2300, 0, 1);
+```
+
+`(H*anchor)/bz` itu sekitar 1700px sendirian begitu kamera nge-zoom out. Jadi `altTop`
+ketambahan segitu tanpa pod-nya naik sama sekali. Setelah kamera diubah biar nempel ke pod
+(lihat bagian sebelumnya), `altTop` naik dua kali lebih cepat dan faktornya saturasi kepagian.
+
+Diukur di arc POWER 12 (apex cuma 221m):
+
+```
+state            camY     bz   lengkung
+lepas landas       54   1.02        0px
+apex            -1400   0.29      218px   <- kubah penuh, seperempat tinggi layar
+abis impact        58   0.91        0px
+```
+
+218px di arc biasa. Itu yang kelihatan.
+
+### Yang diubah
+
+Lengkung dikasih faktornya sendiri, `curveT`, dan inputnya ketinggian **kamera** — bukan
+tepi layar. Kamu cuma lihat planet melengkung kalau KAMU yang tinggi:
+
+```js
+this.curveT = U.clamp((CFG.SURFACE_Y - cam.y - 1600) / 2600, 0, 1);
+```
+
+`spaceT` dibiarin apa adanya buat bintang, jadi bintangnya nggak ikut mundur.
+
+```
+POWER  4   apex  86m   lengkung 0px
+POWER  8   apex 145m   lengkung 0px
+POWER 12   apex 221m   lengkung 0px
+POWER 20   apex 419m   lengkung 101px
+POWER 30   apex 756m   lengkung 192px
+```
+
+### Tapi ada konsekuensi yang belum diputusin
+
+Karena tanah sekarang jatuh keluar layar pas naik, lengkungnya nyaris nggak punya panggung.
+Di-scan sepanjang arc, frame di mana horizon MASIH di layar dan lengkungnya lebih dari 4px:
+
+```
+POWER 12   tidak pernah
+POWER 20   maks 11px  (horizon di 97% layar)
+POWER 30   maks 16px  (horizon di 98%)
+POWER 45   maks 17px  (horizon di 98%)
+```
+
+17px di tepi paling bawah layar itu praktis nggak kelihatan. Dua permintaan kemarin —
+"tanah tetap dibawah" dan "lengkungnya jangan muncul" — sama-sama bener, tapi digabung
+artinya lengkung bumi nggak punya tempat buat tampil lagi.
+
+### Jadi dihapus
+
+Alasan yang diputusin: *"jangan bikin planet melengkung, karena itu bikin susah, semuanya
+harus ikut melengkung."* Itu memang inti masalahnya. Cakrawala melengkung itu all-or-nothing
+— tanah asli, props yang berdiri di atasnya, site, dan marker 100m semuanya digambar di
+world space dan harus ikut membengkok dengan besaran yang sama biar nyambung. Mbengkokin
+latarnya doang itu yang bikin kebacanya kubah nangkring di belakang dunia datar, bukan planet.
+
+Yang dilepas dari `drawStack`:
+
+| dulu | sekarang |
+|---|---|
+| `this.curveT = ...` di `drawSky` | dihapus |
+| `const curve` + `droop(sx)` | dihapus |
+| `curvedFill` (tepi atas ngikutin busur) | `fillBelow` — `fillRect` biasa |
+| `top = topY + droop(...)` di `band()` | `top = topY` |
+| garis tanah gurun `+ droop(sx)` | tinggal gelombang sinusnya |
+
+`this.spaceT` ikut dihapus juga: satu-satunya pembacanya itu si lengkung, jadi begitu
+lengkungnya pergi dia cuma ditulis dan nggak pernah dibaca. Bintang nggak kesenggol —
+dia pakai variabel lokal `space`, bukan field-nya.
+
+Empat state dites (P12/P20/P30 di udara, plus satu run penuh dari pad SUNSCORCHED): nol error,
+cakrawala lurus di semua ketinggian.

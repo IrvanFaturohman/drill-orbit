@@ -89,6 +89,8 @@ const Game = {
     this.bindInput();
 
     this.syncFromSave();
+    /* fall back to home if the saved pad was never actually unlocked */
+    this.padKey = World.padUnlocked(Save.data.pad, Save.data.pads) ? Save.data.pad : 'greenline';
     UI.refreshUpgrades();
     this.resetToPad(true);
 
@@ -185,6 +187,46 @@ const Game = {
     });
   },
 
+  /* ================= launch pad =================
+     CFG.PAD_X is the ORIGIN of the metres-travelled coordinate and never moves; this is
+     where THIS run starts. Splitting the two is what lets the pad travel without
+     invalidating the authored site table or the layout tools. */
+  padKey: 'greenline',
+  get padX() { return World.padX(this.padKey); },
+
+  /* Pick a pad. Refuses anything the player has not actually reached, so a stale save or a
+     hand-edited list cannot drop the pod somewhere it has no business being. */
+  selectPad(key) {
+    if (!World.padUnlocked(key, Save.data.pads)) return false;
+    if (key === this.padKey) return false;
+    this.padKey = key;
+    Save.data.pad = key;
+    Save.save();
+    if (this.state === 'ready') this.resetToPad();
+    UI.buildPadBar(this.padKey);
+    return true;
+  },
+
+  /* Reaching a stage for the first time is what unlocks its pad. Checked against ABSOLUTE
+     world position, not this run's distance, because that is what "I have been here" means. */
+  checkPadUnlock(absM) {
+    for (const pad of World.pads) {
+      if (pad.m === 0 || pad.m > absM) continue;
+      if (Save.data.pads.includes(pad.key)) continue;
+      Save.data.pads.push(pad.key);
+      Save.save();
+      const atm = World.stageAt(World.xOf(pad.m) / CFG.M);
+      this.setBanner('PAD UNLOCKED', atm.name, atm.accent, 1.6, 1.2);
+      this.flash = Math.max(this.flash, 0.3);
+      this.flashColor = '255,220,150';
+      FX.ring(this.pod.x, this.pod.y, {
+        r0: 10, r1: 240, w: 6, color: U.rgba(U.hex(atm.accent), 0.8), life: 0.7,
+      });
+      SFX.newBest();
+      UI.buildPadBar(this.padKey);
+    }
+  },
+
   /* ================= stats from save ================= */
   syncFromSave() {
     const d = Save.data;
@@ -203,7 +245,8 @@ const Game = {
     World.clearCraters();
     FX.reset();
     SFX.stopDrill();
-    this.pod.reset(CFG.PAD_X, World.yAt(CFG.PAD_X) - this.pod.r);
+    const px = this.padX;
+    this.pod.reset(px, World.yAt(px) - this.pod.r);
     this.pod.drilling = false;
     this.pod.angle = -0.35;
     this.run = {
@@ -216,11 +259,14 @@ const Game = {
       impactSpeed: 0, impactEnergy: 0, impactDepth: 0, impactDepthTarget: 0,
       impactDepthFinal: 0, manualDepth: 0, impactHaul: 0, lastBand: -1, launchME: 0,
       fall: 0, ignited: false, apexDone: false, apexT: 0,
-      stageKey: World.stageAt(CFG.PAD_X / CFG.M).key,
-      stageIndex: 0,
+      /* Seeded with the PAD's stage, not the world's first one: starting at SUNSCORCHED
+         would otherwise fire a stage banner on frame one for a stage you never crossed. */
+      stageKey: World.stageAt(px / CFG.M).key,
+      stageIndex: World.stageAt(px / CFG.M).index,
+      absM: World.mOf(px), maxAbsM: World.mOf(px),
     };
-    this.cam.x = CFG.PAD_X + 90;
-    this.cam.y = World.yAt(CFG.PAD_X) - 90;
+    this.cam.x = px + 90;
+    this.cam.y = World.yAt(px) - 90;
     this.cam.zoom = this.cam.tzoom = this.cam.bz = 1;
     this.cam.anchor = 0.55;
     this.meterT = 0.5; this.meterDir = 1;
@@ -228,6 +274,7 @@ const Game = {
     this.stageBanner = null;
     this.stageWash = 0;
     this.impactBurst = null;
+    this.ugReveal = 0;
     this.overdrive = 0;
     this.pod.overdrive = false;
     this.timeScale = 1; this.slowT = 0; this.freezeT = 0;
@@ -237,10 +284,12 @@ const Game = {
     UI.showHint('tap');
     UI.showUpgradeBar(true);
     UI.setChase(null);
-    UI.buildStrip(0);
+    const fromM = World.mOf(px);
+    UI.buildStrip(fromM);
     UI.showStrip(true);
-    const firstSite = World.nextSite(0);
-    if (firstSite) UI.setNext(firstSite, firstSite.m - firstSite.half);
+    UI.buildPadBar(this.padKey);
+    const firstSite = World.nextSite(fromM);
+    if (firstSite) UI.setNext(firstSite, (firstSite.m - firstSite.half) - fromM);
     UI.setSub(Save.data.best > 0 ? 'BEST' : '', Math.round(Save.data.best) + 'm');
     UI.setEnergy(null);
     this.penStopT = 0;
@@ -459,6 +508,9 @@ const Game = {
     Save.data.coins += coins;
     Save.data.runs++;
     Save.data.best = Math.max(Save.data.best, r.maxDist);
+    /* Separate from BEST on purpose: BEST is the best single launch, `reach` is the
+       furthest point in the world ever touched. Only the second one gates anything. */
+    Save.data.reach = Math.max(Save.data.reach || 0, r.maxAbsM || 0);
     Save.data.deepest = Math.max(Save.data.deepest, r.depth);
     Save.save();
     UI.setCoins(Save.data.coins);
@@ -562,6 +614,9 @@ const Game = {
       this.impactBurst.t += rawDt * 0.72;
       if (this.impactBurst.t > this.impactBurst.life) this.impactBurst = null;
     }
+    /* game time, not raw, so the hitstop freezes the reveal along with everything else —
+       the contact freeze-frame holds the surface exactly as it was */
+    if (this.ugReveal < 1) this.ugReveal = Math.min(1, this.ugReveal + dt / CFG.UG_REVEAL_T);
 
     switch (this.state) {
       case 'ready': this.updReady(dt); break;
@@ -588,7 +643,7 @@ const Game = {
     const gy = World.yAt(this.pod.x);
     this.pod.y = gy - this.pod.r - 6 - Math.sin(this.t * 2.2) * 2;
 
-    this.cam.x = U.damp(this.cam.x, CFG.PAD_X + 95, 4, dt);
+    this.cam.x = U.damp(this.cam.x, this.padX + 95, 4, dt);
     this.cam.y = U.damp(this.cam.y, gy - 95, 4, dt);
     this.cam.tzoom = 1;
     this.cam.anchor = 0.55;
@@ -606,14 +661,27 @@ const Game = {
     p.updateFlight(dt, (x, y, spd, ang) => this.onImpact(x, y, spd, ang));
     if (this.state !== 'flying') return;         // the impact took over mid-frame
 
-    const d = Math.max(0, (p.x - CFG.PAD_X) / CFG.M);
+    /* Two distances, and they are not the same thing.
+       `d` is travelled FROM THIS PAD: it is what the launch actually achieved, what the
+       payout is a square root of, and what BEST compares against — a record that stays
+       comparable no matter which pad it was set from.
+       `abs` is the absolute position in the world: it is what sites, atmospheres, the NEXT
+       readout and the pad unlocks are keyed to. Paying out on `abs` would hand a player
+       714 coins for launching from ANOMALY and doing nothing. */
+    const d = Math.max(0, (p.x - this.padX) / CFG.M);
+    const abs = World.mOf(p.x);
     this.run.dist = d;
+    this.run.absM = abs;
     this.updateAtmosphereStage(p.x / CFG.M);
+    if (abs > this.run.maxAbsM) {
+      this.run.maxAbsM = abs;
+      this.updateNext(abs);
+      this.checkPadUnlock(abs);
+    }
     if (d > this.run.maxDist) {
       this.run.maxDist = d;
       UI.setStat(d);
       this.updateChase(d);
-      this.updateNext(d);
       if (Save.data.best > 0 && d > Save.data.best && !this.run.beatBest) {
         this.run.beatBest = true;
         UI.setChase(null);
@@ -769,12 +837,18 @@ const Game = {
     UI.setPhase('impact');
     UI.setEnergy(null);
     UI.setSub('');
-    /* Punch in. Flight ends zoomed way out (0.3-ish); damping from there to the
-       penetration framing took half a second, and for that half second the whole
-       underground field sat revealed on screen at once. Snap most of the way
-       immediately — which is also the camera hit the impact is supposed to have. */
-    this.cam.zoom = Math.max(this.cam.zoom, 0.95);
+    /* Push in, do NOT cut. This used to snap `zoom` straight to 0.95 so the half second of
+       damping could not sit there showing the whole underground field at once — but
+       measured, that snap was 0.40 to 1.04 in a SINGLE frame, a 2.6x jump landing on the
+       same frame as the field appearing. A cut that size is not a punch, it is a splice.
+
+       The field reveal is what actually needed fixing (see CFG.UG_REVEAL_T), and with it
+       fading up the camera is free to travel. It reads as: hitstop holds the contact frame
+       at flight framing, then the camera drives in over ~0.3s while the dig site fades up
+       underneath it. The punch is still carried by the freeze, the directional kick, the
+       flash and the ejecta. */
     this.cam.tzoom = 1.55;
+    this.ugReveal = 0;
 
     /* ---- the bang ---- */
     /* dig the hole for real, BEFORE the field is drawn or the pod starts penetrating */
@@ -1160,15 +1234,23 @@ const Game = {
     const c = this.cam, p = this.pod;
 
     if (this.state === 'flying') {
-      /* Three emotions, one damped chain. CLIMBING: pull back so the arc and its apex are
-         both visible. FALLING: push the framing DOWN toward the ground the pod is about
-         to hit, so the impact point is on screen well before it happens. */
+      /* Three emotions, one damped chain. CLIMBING: ride the pod, so the ground drops away
+         underneath and altitude reads as leaving somewhere. FALLING: push the framing DOWN
+         toward the ground the pod is about to hit, so the impact point is on screen well
+         before it happens.
+
+         The climbing weight used to be 0.55 on the pod, which meant the ground receded at
+         barely half the rate the pod climbed and then parked near the bottom of the screen
+         for the rest of the arc — measured, it moved from 65% to 87% of screen height over
+         a 217m climb and stopped. At 0.90 the ground is properly gone by apex. `fall`
+         hands the framing back on the way down, and it gets there fast: half a second of
+         falling is already vy 700, which is fall 0.5. */
       const gy = World.yAt(p.x);
       const alt = Math.max(0, gy - p.r - p.y);
       const fall = this.run.fall || 0;
       const lead = U.clamp(p.vx * 0.14, 0, 260);
       c.x = U.damp(c.x, p.x + lead, 5.5, dt);
-      c.y = U.damp(c.y, p.y * (0.55 - fall * 0.2) + (gy - 120) * (0.45 + fall * 0.2), 4.2, dt);
+      c.y = U.damp(c.y, p.y * (0.90 - fall * 0.55) + (gy - 120) * (0.10 + fall * 0.55), 4.2, dt);
       /* APEX: an extra beat of pull-back so the whole arc, and the ground waiting under
          it, are both readable for a moment before the fall starts */
       const apex = U.clamp((this.run.apexT || 0) / 0.55, 0, 1);
@@ -1255,7 +1337,7 @@ const Game = {
     const bottom = c.y + (H * (1 - c.anchor)) / c.zoom + 40;
 
     World.drawTerrain(ctx, c, left, right);
-    if (underground) World.drawUnderground(ctx, c, left, right, top, bottom);
+    if (underground) World.drawUnderground(ctx, c, left, right, top, bottom, this.ugReveal);
 
     this.drawPad(ctx);
     this.drawBestFlag(ctx, left, right);
@@ -1283,7 +1365,8 @@ const Game = {
   drawPad(ctx) {
     /* the pod's art is shifted back along its axis (NOSE_PIVOT), so seat the pad under
        where it actually renders, not under its collision point. 0.94 = cos(rest angle). */
-    const x = CFG.PAD_X - this.pod.r * NOSE_PIVOT * 0.94, y = World.yAt(CFG.PAD_X);
+    const px = this.padX;
+    const x = px - this.pod.r * NOSE_PIVOT * 0.94, y = World.yAt(px);
     ctx.fillStyle = 'rgba(0,0,0,.18)';
     ctx.beginPath(); ctx.ellipse(x, y + 2, 42, 8, 0, 0, U.TAU); ctx.fill();
     ctx.fillStyle = '#4b5878';
@@ -1355,7 +1438,8 @@ const Game = {
   drawBestFlag(ctx, left, right) {
     const b = Save.data.best;
     if (b <= 5) return;
-    const x = CFG.PAD_X + b * CFG.M;
+    /* BEST is a launch distance, so the flag is planted that far from THIS pad. */
+    const x = this.padX + b * CFG.M;
     if (x < left - 60 || x > right + 60) return;
     const y = World.yAt(x);
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
